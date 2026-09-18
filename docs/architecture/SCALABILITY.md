@@ -1,17 +1,17 @@
 # Scalability
 
-## Current state: intentionally not scaled
-`desiredCount: 1` in `control-plane-stack.ts`. This is a hard requirement
-today, not just a default — the work-fence epoch registry and redemption
-ledger are in-memory inside the single running instance (see ADR-005,
-LIMITATIONS.md). Running more than one task right now would let two
-instances disagree about whether a job's epoch is valid.
+## Current state: not scaled, but no longer blocked
+`desiredCount: 1` in `control-plane-stack.ts` is now a default, not a hard
+requirement. The work-fence epoch registry and redemption ledger are
+DynamoDB-backed (ADR-005), so two tasks cannot disagree about whether a
+job's epoch is valid. No Application Auto Scaling policy is configured
+yet, so scaling out is still a manual `desiredCount` change (and is
+unverified in a live account — see LIMITATIONS.md).
 
 ## Path to scaling out
-1. Move `EpochRegistry` + the redemption ledger to DynamoDB, using a
-   conditional `PutItem` (`attribute_not_exists(pk)`) for the same
-   first-writer-wins semantics `ConcurrentHashMap.computeIfAbsent`
-   currently gives for free in one process.
+1. (Done) `EpochRegistry` + `RedemptionLedger` are DynamoDB-backed; the
+   first redemption is a conditional `PutItem` (`attribute_not_exists(pk)`)
+   with first-writer-wins semantics.
 2. Bump `desiredCount` and add an Application Auto Scaling policy on
    CPU/request count.
 3. Everything else (Release, Contract, Organization, AppService) is

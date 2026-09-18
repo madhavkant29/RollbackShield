@@ -11,6 +11,7 @@ import com.rollbackshield.shared.events.domain.DomainEvent;
 import com.rollbackshield.shared.events.domain.EventPublisher;
 import com.rollbackshield.workfence.domain.EpochRegistry;
 import com.rollbackshield.workfence.domain.RedeemOutcome;
+import com.rollbackshield.workfence.domain.RedemptionLedger;
 import com.rollbackshield.workfence.domain.WorkJob;
 import com.rollbackshield.workfence.domain.WorkQueue;
 import org.springframework.stereotype.Service;
@@ -19,7 +20,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Owns the epoch registry and job redemption ledger. Redemption is the
@@ -36,15 +36,18 @@ public class WorkFenceApplicationService {
     private final WorkQueue workQueue;
     private final AuditTrail auditTrail;
     private final EventPublisher events;
-    private final EpochRegistry epochRegistry = new EpochRegistry();
-    private final ConcurrentHashMap<String, RedeemOutcome> redemptions = new ConcurrentHashMap<>();
+    private final EpochRegistry epochRegistry;
+    private final RedemptionLedger redemptionLedger;
 
     public WorkFenceApplicationService(ReleaseRepository releases, WorkQueue workQueue, AuditTrail auditTrail,
-                                        EventPublisher events) {
+                                        EventPublisher events, EpochRegistry epochRegistry,
+                                        RedemptionLedger redemptionLedger) {
         this.releases = releases;
         this.workQueue = workQueue;
         this.auditTrail = auditTrail;
         this.events = events;
+        this.epochRegistry = epochRegistry;
+        this.redemptionLedger = redemptionLedger;
     }
 
     public WorkJob enqueueWork(ReleaseId releaseId, String jobType, String payload) {
@@ -79,8 +82,10 @@ public class WorkFenceApplicationService {
     }
 
     public RedeemOutcome redeem(String jobId, ReleaseId releaseId, long releaseEpoch) {
-        RedeemOutcome outcome = redemptions.computeIfAbsent(jobId, id ->
-            epochRegistry.isValid(releaseId, releaseEpoch) ? RedeemOutcome.EXECUTE : RedeemOutcome.CANCEL);
+        RedeemOutcome candidate = epochRegistry.isValid(releaseId, releaseEpoch)
+            ? RedeemOutcome.EXECUTE
+            : RedeemOutcome.CANCEL;
+        RedeemOutcome outcome = redemptionLedger.commitIfAbsent(jobId, releaseId, candidate);
 
         releases.findById(releaseId).ifPresent(release ->
             auditTrail.append(AuditEvent.of(release.organizationId().toString(), releaseId.toString(),

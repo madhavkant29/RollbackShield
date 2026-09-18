@@ -29,13 +29,23 @@ ARCHITECTURE.md` for what's supposed to prevent it
 (caller's org, target resource id) and treat as P0.
 
 ## Rollback isn't fencing work correctly
-Check `docs/adr/005-work-epoch-fencing.md` — if running with
-`desiredCount > 1`, this is the known gap (in-memory epoch registry not
-yet shared across instances). Reduce to `desiredCount: 1` as an immediate
-mitigation.
+Check `docs/adr/005-work-epoch-fencing.md`. The epoch registry and
+redemption ledger are DynamoDB-backed, so multi-instance is no longer the
+suspect. Instead check: the worker is calling
+`POST /work/{jobId}/redeem` before the side effect (not after), and that
+the `releaseId`/`releaseEpoch` it sends match the job it received from
+`GET /work/poll`. A job whose first redemption committed `EXECUTE` stays
+`EXECUTE` by design, even if the epoch is invalidated a moment later.
 
 ## Rotating a leaked credential
 IAM user access key: `aws iam create-access-key` → update local profile
 → `aws iam delete-access-key --access-key-id <old>`. Cognito is
 unaffected (JWTs are short-lived and validated per-request, not a shared
 secret).
+
+Service credential (`ROLLBACKSHIELD_SERVICE_CREDENTIAL`): update the value
+in the secret store and the ECS task definition, redeploy the backend,
+then restart every caller (`demo-worker`, and any hosted SDK user) with
+the new value. Once the backend is redeployed the old value is rejected
+immediately — there is no overlap window, so update callers promptly.
+`local` dev uses `local-dev-service-credential` and never touches this.

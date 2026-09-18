@@ -20,6 +20,9 @@ import com.rollbackshield.shared.domain.OrganizationId;
 import com.rollbackshield.shared.domain.PolicyVersion;
 import com.rollbackshield.shared.domain.ReleaseId;
 import com.rollbackshield.shared.domain.ServiceId;
+import com.rollbackshield.workfence.adapter.DynamoDbEpochRegistry;
+import com.rollbackshield.workfence.adapter.DynamoDbRedemptionLedger;
+import com.rollbackshield.workfence.domain.RedeemOutcome;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
@@ -47,10 +50,18 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -82,6 +93,8 @@ class DynamoDbAdapterIntegrationTest {
     private static DynamoDbAppServiceRepository serviceRepo;
     private static DynamoDbOrganizationRepository organizationRepo;
     private static DynamoDbAuditTrail auditTrail;
+    private static DynamoDbEpochRegistry epochRegistry;
+    private static DynamoDbRedemptionLedger redemptionLedger;
 
     @BeforeAll
     static void setUp() {
@@ -119,6 +132,8 @@ class DynamoDbAdapterIntegrationTest {
         serviceRepo = new DynamoDbAppServiceRepository(enhancedClient, TABLE);
         organizationRepo = new DynamoDbOrganizationRepository(enhancedClient, TABLE);
         auditTrail = new DynamoDbAuditTrail(enhancedClient, TABLE);
+        epochRegistry = new DynamoDbEpochRegistry(enhancedClient, TABLE);
+        redemptionLedger = new DynamoDbRedemptionLedger(enhancedClient, TABLE);
     }
 
     @Test
@@ -270,5 +285,70 @@ class DynamoDbAdapterIntegrationTest {
             .containsExactly("e1", "e2");
         assertThat(auditTrail.listForRelease(releaseId.toString()).get(0).metadata())
             .containsEntry("k", "v");
+    }
+
+    @Test
+    void epochInvalidationIsDurableAndIdempotent() {
+        ReleaseId releaseId = ReleaseId.newId();
+        assertThat(epochRegistry.isValid(releaseId, 1)).isTrue();
+
+        epochRegistry.invalidate(releaseId, 1);
+        assertThat(epochRegistry.isValid(releaseId, 1)).isFalse();
+
+        epochRegistry.invalidate(releaseId, 1); // idempotent
+        assertThat(epochRegistry.isValid(releaseId, 1)).isFalse();
+
+        // epoch scoping is per release
+        assertThat(epochRegistry.isValid(ReleaseId.newId(), 1)).isTrue();
+    }
+
+    @Test
+    void redemptionLedgerKeepsTheFirstCommittedOutcome() {
+        String jobId = UUID.randomUUID().toString();
+        ReleaseId releaseId = ReleaseId.newId();
+
+        assertThat(redemptionLedger.commitIfAbsent(jobId, releaseId, RedeemOutcome.EXECUTE))
+            .isEqualTo(RedeemOutcome.EXECUTE);
+        assertThat(redemptionLedger.commitIfAbsent(jobId, releaseId, RedeemOutcome.CANCEL))
+            .isEqualTo(RedeemOutcome.EXECUTE);
+    }
+
+    /**
+     * The multi-task guarantee ADR-005 depends on: concurrent redemptions
+     * of the same jobId must all observe one committed outcome, even when
+     * they propose different candidates. The conditional put decides it.
+     */
+    @Test
+    void concurrentRedemptionsCommitExactlyOneOutcome() throws Exception {
+        String jobId = UUID.randomUUID().toString();
+        ReleaseId releaseId = ReleaseId.newId();
+        int threads = 8;
+
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<RedeemOutcome>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < threads; i++) {
+                RedeemOutcome candidate = (i % 2 == 0) ? RedeemOutcome.EXECUTE : RedeemOutcome.CANCEL;
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return redemptionLedger.commitIfAbsent(jobId, releaseId, candidate);
+                }));
+            }
+            start.countDown();
+
+            Set<RedeemOutcome> observed = new HashSet<>();
+            for (Future<RedeemOutcome> future : futures) {
+                observed.add(future.get(30, TimeUnit.SECONDS));
+            }
+
+            assertThat(observed)
+                .as("every concurrent writer must observe the same committed outcome")
+                .hasSize(1);
+            assertThat(redemptionLedger.commitIfAbsent(jobId, releaseId, RedeemOutcome.CANCEL))
+                .isEqualTo(observed.iterator().next());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

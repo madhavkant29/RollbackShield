@@ -18,43 +18,50 @@ production to keep changing after "rollback" completed.
    subsequent redemptions for that epoch return `CANCEL`.
 
 ## Domain objects
-`WorkJob`, `EpochRegistry`, `RedeemOutcome` (`EXECUTE`/`CANCEL`),
-`WorkQueue` port (`InMemoryWorkQueue` / `SqsWorkQueueAdapter`).
+`WorkJob`, `RedeemOutcome` (`EXECUTE`/`CANCEL`), and three ports:
+`EpochRegistry`, `RedemptionLedger`, `WorkQueue`. Adapters:
+`InMemoryEpochRegistry` / `InMemoryRedemptionLedger` / `InMemoryWorkQueue`
+(local dev) and `DynamoDbEpochRegistry` / `DynamoDbRedemptionLedger` /
+`SqsWorkQueueAdapter` (`aws`).
 
 ## The atomicity that makes this safe under at-least-once delivery
-`WorkFenceApplicationService.redeem()` uses
-`ConcurrentHashMap.computeIfAbsent()` keyed by `jobId`: the *first*
-redemption attempt for a job decides `EXECUTE`/`CANCEL` based on epoch
-validity at that instant; every later attempt for the same `jobId` —
-regardless of any epoch change in between — observes that same committed
-outcome. Proven directly in the Phase C/D demo: delivering the same job
-twice never produces two real executions. See ADR-005.
+`WorkFenceApplicationService.redeem()` computes a candidate outcome from
+epoch validity, then calls `RedemptionLedger.commitIfAbsent(jobId, ...)`:
+the *first* committed outcome for a job is final, and every later attempt
+for the same `jobId` — regardless of any epoch change in between —
+observes it. In local dev that is `ConcurrentHashMap.putIfAbsent`; under
+`aws` it is a DynamoDB conditional put (`attribute_not_exists(pk)`) whose
+losing concurrent writer re-reads the winner's outcome, so two backend
+tasks cannot both decide. See ADR-005.
 
 ## Consistency
-**Known gap** (see LIMITATIONS.md): the redemption ledger and
-`EpochRegistry` are currently in-memory inside a single
-`WorkFenceApplicationService` instance — correct for `desiredCount: 1`,
-not yet safe for more than one backend task or a restart. Needs a
-DynamoDB conditional-write version before scaling out.
+The fence is durable and shared under `aws`: epoch invalidation survives a
+restart and is visible to every backend task, so this is no longer a
+reason to pin `desiredCount: 1` (verified against DynamoDB Local,
+including concurrent redemptions).
 
 ## Failure cases
-- Worker crashes after redeeming but before performing the side effect →
-  the job is "spent" (marked `EXECUTE`) but never actually executed. Not
-  yet handled — a real implementation needs the worker to only mark
-  redemption *after* the side effect succeeds, or a saga/outbox pattern.
-  Tracked in LIMITATIONS.md as a gap, not silently ignored.
+- Worker crashes after redeeming `EXECUTE` but before performing the side
+  effect → the job is "spent" but never executed. This is a deliberate
+  at-most-once tradeoff: for an irreversible side effect (e.g. a refund),
+  skipping once is safer than risking a duplicate. Recovery is
+  operational — re-enqueue a new job (new jobId) for the affected order
+  once the worker is healthy; a saga/outbox that makes this automatic is
+  not built.
 - SQS delivers a message the redemption ledger has never seen — handled
   correctly (first-seen decides).
 
 ## Security
 Only the control plane invalidates epochs (via the rollback endpoint);
-nothing else can.
+nothing else can. The worker endpoints require the shared service
+credential — see `docs/architecture/SECURITY_ARCHITECTURE.md`.
 
 ## Tests
-`WorkFenceApplicationService` is covered indirectly through
-`ReleaseLifecycleIntegrationTest`'s full rollback scenario (enqueue →
-rollback → redeem twice → `CANCEL` both times). No isolated unit test for
-`WorkFenceApplicationService` yet — worth adding.
+`WorkFenceApplicationServiceTest` pins the decision rule in isolation
+(EXECUTE stays EXECUTE after a later invalidation; CANCEL stays CANCEL),
+`ReleaseLifecycleIntegrationTest` covers enqueue → rollback → redeem twice
+→ `CANCEL` over HTTP, and `DynamoDbAdapterIntegrationTest` covers the
+durable adapters including an 8-thread concurrent-redeem test.
 
 ## Future
 Once the redemption ledger is DynamoDB-backed, `QUARANTINE` as a third

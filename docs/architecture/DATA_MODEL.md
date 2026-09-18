@@ -11,6 +11,8 @@ Single DynamoDB table, `rollbackshield` (ADR-004), one GSI (`gsi1`).
 | Release | `RELEASE#<id>` | `RELEASE#<id>` | `SERVICE#<serviceId>` | `RELEASE#<id>` |
 | RollbackContract | `RELEASE#<releaseId>` | `CONTRACT#<id>` | `CONTRACT#<id>` | `CONTRACT#<id>` |
 | AuditEvent | `RELEASE#<releaseId>` | `AUDIT#<epochMillis>#<eventId>` | — | — |
+| EpochInvalidation | `RELEASE#<releaseId>` | `EPOCH#<epoch>` | — | — |
+| Redemption | `JOB#<jobId>` | `JOB#<jobId>` | — | — |
 
 ## Access patterns → query
 
@@ -23,6 +25,9 @@ Single DynamoDB table, `rollbackshield` (ADR-004), one GSI (`gsi1`).
 | Get active contract for release | `Query` pk=`RELEASE#id`, sk begins_with `CONTRACT#`, filter status=ACTIVE |
 | Get contract by id | `Query` gsi1 pk=`CONTRACT#id` |
 | List audit for release | `Query` pk=`RELEASE#id`, sk begins_with `AUDIT#` (chronological for free) |
+| Check epoch validity | `GetItem` pk=`RELEASE#id`, sk=`EPOCH#epoch` (absent = valid) |
+| Read committed redemption | `GetItem` pk=sk=`JOB#jobId` |
+| Commit redemption (first wins) | `PutItem` pk=sk=`JOB#jobId`, condition `attribute_not_exists(pk)` |
 
 No Scan anywhere.
 

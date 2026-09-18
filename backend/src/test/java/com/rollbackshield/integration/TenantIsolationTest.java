@@ -11,6 +11,8 @@ import com.rollbackshield.release.application.ReleaseApplicationService;
 import com.rollbackshield.release.domain.Release;
 import com.rollbackshield.shared.api.NotFoundException;
 import com.rollbackshield.shared.domain.OrganizationId;
+import com.rollbackshield.workfence.adapter.InMemoryEpochRegistry;
+import com.rollbackshield.workfence.adapter.InMemoryRedemptionLedger;
 import com.rollbackshield.workfence.adapter.InMemoryWorkQueue;
 import com.rollbackshield.workfence.application.WorkFenceApplicationService;
 import org.junit.jupiter.api.Test;
@@ -36,7 +38,8 @@ class TenantIsolationTest {
     private final InMemoryReleaseRepository releases = new InMemoryReleaseRepository();
     private final InMemoryAuditTrail auditTrail = new InMemoryAuditTrail();
     private final WorkFenceApplicationService workFence = new WorkFenceApplicationService(
-        releases, new InMemoryWorkQueue(), auditTrail, event -> { });
+        releases, new InMemoryWorkQueue(), auditTrail, event -> { },
+        new InMemoryEpochRegistry(), new InMemoryRedemptionLedger());
 
     private final CatalogApplicationService catalog = new CatalogApplicationService(organizations, services);
     private final ReleaseApplicationService releaseService = new ReleaseApplicationService(
