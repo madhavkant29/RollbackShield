@@ -72,12 +72,13 @@ profile is fully in-memory.
 
 ## Tests
 `docs/development/TESTING_STRATEGY.md`. Status: run and green in a real
-environment — `sdk-java` (12 tests) and `backend mvn verify` (21 tests,
+environment — `sdk-java` (14 tests) and `backend mvn verify` (32 tests),
 including ArchUnit `ModuleBoundaryTest`, `ReleaseLifecycleIntegrationTest`,
-`TenantIsolationTest`, `CorsConfigurationTest`, and
-`DynamoDbAdapterIntegrationTest`, which runs the real DynamoDB adapters
-against DynamoDB Local via Testcontainers). See Limitations for what still
-isn't covered.
+`TenantIsolationTest`, `CorsConfigurationTest`, `ServiceCredentialAuthTest`,
+`DynamoDbAdapterIntegrationTest` (DynamoDB Local via Testcontainers), and
+`AwsAdapterLocalStackIntegrationTest` (EventBridge + SQS via LocalStack).
+The control room has committed Playwright E2E tests (`frontend/e2e`). See
+Limitations for what still isn't covered.
 
 ## AWS deployment
 `docs/operations/AWS_DEPLOYMENT.md` — root hygiene, IAM Identity Center
@@ -85,19 +86,20 @@ setup, IAM user+AssumeRole fallback, CDK bootstrap/deploy, verification,
 cleanup. Not yet deployed to a live account from this build.
 
 ## Security summary
-Cognito JWT auth (or local-dev bypass), org-scoped tenant isolation
-(`TenantIsolationTest`), separate ECS execution/task IAM roles, no static
-credentials anywhere. Known open gaps — worker endpoints and the SDK's
-policy fetch aren't yet authenticated — are documented, not hidden: see
-`docs/architecture/SECURITY_ARCHITECTURE.md`.
+Cognito JWT auth for users (or local-dev bypass), Cognito Hosted UI PKCE
+sign-in in the control room, a shared service credential for the worker
+and SDK endpoints, org-scoped tenant isolation (`TenantIsolationTest`),
+separate ECS execution/task IAM roles, no static credentials anywhere.
+Details and the remaining hardening item (one shared service credential
+rather than per-contract keys): `docs/architecture/SECURITY_ARCHITECTURE.md`.
 
 ## Limitations
-`docs/product/LIMITATIONS.md` — read this before a demo. The one that
-matters most: the work-fence epoch registry is in-memory (fine for one
-instance, not yet safe beyond that). The backend, SDK, demo, container
-image, and control room have all been built and exercised for real; the
-control room only authenticates under the `local` profile today (it sends
-no Cognito token yet).
+`docs/product/LIMITATIONS.md` — read this before a demo. The backend, SDK,
+demo, container image, control room, DynamoDB adapters, and
+EventBridge/SQS adapters have all been built and exercised for real
+(against local emulators where AWS is involved). The one substantial thing
+left: **nothing has run in a live AWS account** — `cdk deploy` is
+unverified.
 
 ## Roadmap
 `docs/product/ROADMAP.md`.

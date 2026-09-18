@@ -24,11 +24,15 @@ anything works.
 - The SDK's `HttpPolicySource` + `MinimalJson` + `PolicyCache` +
   `RollbackGuard` chain, proven end-to-end against a real local
   `HttpServer` — genuine HTTP fetch, real JSON parse, correct
-  block/allow decisions. `sdk-java` `mvn install` is green (12 tests).
+  block/allow decisions, service-credential header asserted. `sdk-java`
+  `mvn install` is green (14 tests).
 - The entire Spring Boot backend now compiles and `mvn clean verify` is
-  green (15 tests: ArchUnit `ModuleBoundaryTest`,
+  green (32 tests: ArchUnit `ModuleBoundaryTest`,
   `ReleaseLifecycleIntegrationTest`, `TenantIsolationTest`,
-  `CorsConfigurationTest`, `ReversibilityEvaluatorTest`). Two real
+  `CorsConfigurationTest`, `ServiceCredentialAuthTest`,
+  `ReversibilityEvaluatorTest`, `WorkFenceApplicationServiceTest`,
+  `DynamoDbAdapterIntegrationTest` against DynamoDB Local, and
+  `AwsAdapterLocalStackIntegrationTest` against LocalStack). Two real
   build-blockers were fixed on first compile: an illegal `--` in an XML
   comment in `backend/pom.xml`, and a spurious required `releaseId` body
   field in `CreateContractRequest`.
@@ -44,15 +48,19 @@ anything works.
 - `backend/Dockerfile` now builds; the container serves
   `/actuator/health` = `UP`.
 
-**Still open:**
-- `cdk deploy` to a real AWS account (never attempted — needs your
-  account).
-- DynamoDB adapters are now verified against DynamoDB Local
-  (`DynamoDbAdapterIntegrationTest`, 6 tests — mapping, gsi1, contract
-  JSON, optimistic lock). EventBridge/SQS adapters and real AWS auth/region
-  still have not been run.
-- Frontend Cognito auth: the control room sends no `Authorization`
-  header, so it only works under the `local` profile.
+Also verified since: work-fence epoch registry + redemption ledger are
+DynamoDB-backed (ADR-005, concurrent-redeem test); worker + SDK endpoints
+require a shared service credential; the control room implements Cognito
+PKCE sign-in and attaches the Bearer token (Playwright-tested); frontend
+`npm run lint` passes; EventBridge/SQS run against LocalStack.
+
+**Still open (needs your AWS account, or is deliberately deferred):**
+- `cdk deploy` to a real AWS account — never attempted. Real IAM task-role
+  auth and region resolution are therefore unverified.
+- Real Cognito Hosted UI not driven end-to-end (client flow + Bearer
+  attachment are implemented and tested against a fake token).
+- `MutationBlocked`/`RollbackRiskDetected` telemetry ingestion is not
+  built (SDK buffers, does not report) — see LIMITATIONS.md.
 
 ## Immediate next steps, in order
 
@@ -68,29 +76,27 @@ anything works.
    The predicted `ControlPlaneClient`/controller shape mismatch surfaced
    as the `CreateContractRequest.releaseId` field (now removed).
 5. **DONE — `backend/Dockerfile` built; container health = UP.**
-6. Work through `docs/product/LIMITATIONS.md` — the DynamoDB-backed
-   work-fence ledger (needed before `desiredCount > 1`), real
-   DynamoDB/SQS/EventBridge verification, frontend Cognito auth, and the
-   worker/SDK auth gaps are the substantive ones left.
-7. AWS deployment: `docs/operations/AWS_DEPLOYMENT.md` has exact
-   commands, expected outputs, and a troubleshooting handoff format.
+6. **DONE — LIMITATIONS gaps closed**: DynamoDB-backed work-fence ledger,
+   worker/SDK service credential, frontend Cognito PKCE, DynamoDB Local +
+   LocalStack adapter verification, frontend E2E + lint. The only entry
+   left in `LIMITATIONS.md` is the live-AWS one below.
+7. **OPEN — AWS deployment**: `docs/operations/AWS_DEPLOYMENT.md` has
+   exact commands, expected outputs, and a troubleshooting handoff
+   format. This file stays until that has actually run.
 
-## Known specific risk areas (where a bug is most likely)
+## Former risk areas (all now covered by tests)
 
-- `WorkFenceApplicationService`'s constructor signature changed more
-  than once during development (EventPublisher was added late) — double
-  check every call site actually matches.
-- `ContractApplicationService.toDomainRule`/`toDto` are the single
-  mapping point between the REST wire format, the DynamoDB JSON column,
-  and the domain `CompatibilityRule` hierarchy — if contract rules ever
-  come back malformed, start here.
-- `DynamoDbReleaseRepository.compareAndSave`'s interaction with
-  `@DynamoDbVersionAttribute` (copying `current.getVersion()` onto the
-  next item before `putItem`) is the kind of thing that looks right on
-  paper and needs a real DynamoDB (or DynamoDB Local) to confirm.
-- Every DynamoDB `*Item` class was written against AWS SDK v2's Enhanced
-  Client API from training knowledge, not a working example — treat
-  these as the least-trustworthy files in the backend.
+- `WorkFenceApplicationService`'s constructor changed again when the
+  epoch registry/ledger became ports; all call sites (Spring wiring,
+  `TenantIsolationTest`) were updated and `WorkFenceApplicationServiceTest`
+  pins the decision rule.
+- `ContractApplicationService.toDomainRule`/`toDto` (wire ↔ DynamoDB JSON
+  ↔ domain rules) is covered by the all-five-rule-types round-trip in
+  `DynamoDbAdapterIntegrationTest`.
+- `DynamoDbReleaseRepository.compareAndSave` + `@DynamoDbVersionAttribute`
+  is confirmed by the optimistic-lock test in the same class.
+- Every DynamoDB `*Item` class is exercised against DynamoDB Local, and
+  the EventBridge/SQS wire formats against LocalStack.
 
 ## What to delete once things are working
 

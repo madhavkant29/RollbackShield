@@ -35,7 +35,25 @@ cd frontend && npm install && npm run dev
 ```
 Opens on `http://localhost:3000`, talks to the backend at
 `http://localhost:8080` by default (`NEXT_PUBLIC_ROLLBACKSHIELD_API_URL`
-to override).
+to override). No Cognito config is needed locally; the backend's `local`
+profile accepts the fixed dev principal.
+
+## Service credential (worker + SDK)
+`GET /work/poll`, `POST /work/{jobId}/redeem`, and the SDK's policy fetch
+require `X-RollbackShield-Service-Credential`. Under `local` it defaults to
+`local-dev-service-credential` (the SDK, `ProtectedDemo`, and
+`demo-worker` all default to the same value); override with
+`ROLLBACKSHIELD_SERVICE_CREDENTIAL`.
+
+## Frontend E2E tests
+With the backend running and a production build in place:
+```
+cd frontend && npm run build && npm run test:e2e
+```
+This drives the real control room (service → release → contract →
+rollback) in headless Chromium. The auth test only runs when the build was
+made with `NEXT_PUBLIC_COGNITO_DOMAIN`/`NEXT_PUBLIC_COGNITO_CLIENT_ID`
+set; otherwise it skips. Not part of CI (it needs a live backend).
 
 ## Recommended order for a first run
 1. `backend` (`mvn spring-boot:run`) — leave running.

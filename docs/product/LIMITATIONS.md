@@ -5,72 +5,53 @@ reality.
 
 ## Correctness gaps
 
-- **Epoch registry and job redemption ledger are in-memory**
-  (`WorkFenceApplicationService`'s `EpochRegistry` and
-  `ConcurrentHashMap<jobId, RedeemOutcome>`). Correct for a single backend
-  instance (the CDK stack currently sets `desiredCount: 1`), but will NOT
-  survive a restart or work correctly with more than one task running
-  concurrently. Needs a DynamoDB-backed version with conditional writes
-  before scaling past one instance. See ADR-005.
-- Same caveat applies to nothing else currently -- Release, Contract,
-  Organization, and AppService state all go through the repository ports
-  and are DynamoDB-backed correctly under the `aws` profile.
+None open.
 
-## Verification status (updated after a real build/run)
+- Release, Contract, Organization, and AppService state all go through
+  repository ports; the work-fence epoch registry and redemption ledger
+  are DynamoDB-backed ports too (ADR-005) -- durable across restarts and
+  safe with more than one backend task.
+- The one remaining behavioural tradeoff is deliberate, not a bug: a
+  worker that crashes after redeeming `EXECUTE` but before performing the
+  side effect forfeits that effect (at-most-once) rather than risking a
+  duplicate. Documented in `docs/features/WORK_FENCING.md`.
 
-- The Spring Boot backend **has now been compiled and run**: `mvn clean
-  verify` is green (21 tests, including ArchUnit `ModuleBoundaryTest`,
+## Verification status (as of the last real build/run)
+
+- `sdk-java` `mvn install` is green (14 tests).
+- `backend` `mvn clean verify` is green (32 tests): ArchUnit
+  `ModuleBoundaryTest`, `CorsConfigurationTest`, the full
   `ReleaseLifecycleIntegrationTest`, `TenantIsolationTest`,
-  `CorsConfigurationTest`, `DynamoDbAdapterIntegrationTest`). Two
-  build-blocking defects were fixed on the
-  first real compile: an illegal `--` inside an XML comment in
-  `backend/pom.xml` (the POM did not parse at all), and a spurious required
-  `releaseId` field in `CreateContractRequest` that the path-variable API
-  never used.
-- `ProtectedDemo` **has now run against a live backend** (`local` profile):
-  the full service -> release -> contract -> SDK policy fetch -> block/allow
-  -> epoch-fenced work -> rollback -> idempotent redeem -> audit sequence
-  works over real HTTP.
-- The Next.js control room **has now been exercised end-to-end in a real
-  browser** (headless Chromium) against the live backend: create service,
-  create release, prepare, ready, activate contract, roll back, with the
-  reversibility checks and audit trail rendering real data. Two gaps were
-  found and fixed in the process: the backend had no CORS configuration
-  (the browser blocked every call from the `:3000` origin), and the UI had
-  no way to create a contract -- the Contracts page pointed at the release
-  control room, which had no such control, so `PROTECTED_ROLLOUT` was
-  unreachable from the UI.
-- The CDK stacks were verified for real: `npm install` and
-  `cdk synth --all` both succeed, producing valid CloudFormation for all
-  five stacks. `cdk deploy` has not been run -- that needs your AWS
-  account.
-- Integration/E2E tests for the REST API boundary now exist and pass
-  (`ReleaseLifecycleIntegrationTest`, `TenantIsolationTest`,
-  `CorsConfigurationTest`).
+  `ServiceCredentialAuthTest`, `ReversibilityEvaluatorTest`,
+  `WorkFenceApplicationServiceTest`, `DynamoDbAdapterIntegrationTest`
+  (DynamoDB Local via Testcontainers, incl. concurrent redemptions), and
+  `AwsAdapterLocalStackIntegrationTest` (EventBridge + SQS via LocalStack).
+- `ProtectedDemo` runs end-to-end against a live backend over real HTTP.
+- The control room is exercised in a real browser by committed Playwright
+  tests (`frontend/e2e`): the service -> release -> contract -> rollback
+  flow, and a Bearer-header test that runs against a Cognito-configured
+  build.
+- `npx cdk synth --all` produces valid CloudFormation for all five stacks.
+- `backend/Dockerfile` builds; the container serves `/actuator/health` =
+  `UP`.
 
-## Scope not yet built
+## Still not verified / not built
 
-- Frontend Cognito auth: the control room fetches the API with no
-  `Authorization` header, so it only works under the `local` profile. It
-  needs a real token (Cognito Hosted UI / Amplify) before it can talk to
-  the `aws` deployment. CORS origins are now configurable
-  (`ROLLBACKSHIELD_ALLOWED_ORIGINS`, default `http://localhost:3000`) --
-  set it to the real control-room origin in AWS.
-- DynamoDB adapters are now verified against **DynamoDB Local** via
-  `DynamoDbAdapterIntegrationTest` (Testcontainers; it creates the exact
-  table/gsi1 from `data-stack.ts`): item mapping for every `*Item` class,
-  gsi1 lookups, the contract rules JSON round-trip, and the
-  `compareAndSave` optimistic-lock conditional write all behave correctly.
-  Still **not** exercised against real AWS (IAM task-role auth, region
-  resolution), and the EventBridge/SQS adapters have only ever been
-  instantiated, never run -- both remain unverified outside the in-memory
-  profile.
-- `MutationBlocked`/`RollbackRiskDetected` domain events (§35) -- the SDK
-  doesn't yet report blocked mutations back to the control plane via
-  telemetry ingestion; only server-driven events (release/contract/work
-  lifecycle) are published today.
+- **No live AWS run.** The DynamoDB, EventBridge, and SQS adapters are
+  verified against local emulators (DynamoDB Local, LocalStack), not a
+  real account; `cdk deploy` has never been run. IAM task-role auth and
+  region resolution in real AWS are therefore unverified. This is the one
+  item here that needs something a normal dev environment cannot provide.
+- **Real Cognito Hosted UI is not exercised.** The frontend PKCE flow and
+  `Authorization: Bearer` attachment are implemented, and the token
+  attachment is covered by a test; no real Cognito user pool has been
+  driven end-to-end.
+- `MutationBlocked`/`RollbackRiskDetected` telemetry ingestion (§35): the
+  SDK buffers these decisions but does not yet report them to the control
+  plane; only server-driven events are published.
+- One shared service credential, not per-contract credentials/mTLS.
 
-## Security gap found and fixed during doc review
+## Security gaps found and fixed during this build
 
 - `ReversibilityController`, `AuditController`, the work-enqueue endpoint,
   and `ContractController`'s create/get endpoints originally had NO
@@ -81,14 +62,13 @@ reality.
   immediately in the same pass (all now check the caller's organization
   against the resource's, matching the pattern `ReleaseController`
   already used).
-- `GET /work/poll` and `POST /work/{jobId}/redeem` remain intentionally
-  unscoped by organization -- these are meant to be called by a worker
-  process across all tenants, not by a per-tenant user. They need their
-  own service-credential auth model (not a user JWT) before being exposed
-  outside a trusted network. Not fixed yet.
-- `GET /contracts/{contractId}/policy` (the SDK's fetch endpoint) is also
-  unauthenticated by design today -- the SDK sends no Authorization
-  header, since it runs inside the protected application's process, not
-  a browser session. An unguessable contract UUID is the only protection
-  right now. A per-contract fetch credential (API key or mTLS) is the
-  correct fix and is not yet built.
+- `GET /work/poll`, `POST /work/{jobId}/redeem`, and
+  `GET /contracts/{contractId}/policy` were unauthenticated. They are
+  worker/infrastructure calls, not tenant calls, so they now require a
+  shared service credential (`X-RollbackShield-Service-Credential`,
+  `ServiceCredentialAuthFilter`, constant-time compared) plus the
+  `SERVICE` authority. A user JWT cannot reach them; the service
+  credential cannot reach tenant endpoints. `local` has a fixed dev
+  default; `aws` has no default and fails closed. A per-contract
+  credential beyond a single shared secret remains future hardening
+  (ROADMAP v0.2).
