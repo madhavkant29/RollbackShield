@@ -27,9 +27,20 @@ import java.util.List;
  * in AWS) and calls the control plane cross-origin. Origins are an explicit
  * allow-list from configuration, never '*', and credentials are disabled
  * (the UI sends no cookies; AWS auth is a Bearer token).
+ *
+ * Service-credential endpoints (worker poll/redeem, SDK policy fetch) are
+ * authenticated by {@link ServiceCredentialAuthFilter} in both chains and
+ * require the SERVICE authority -- a user JWT cannot reach them, and the
+ * service credential cannot reach tenant endpoints.
  */
 @Configuration
 public class SecurityConfig {
+
+    private final String serviceCredential;
+
+    public SecurityConfig(@Value("${rollbackshield.service-credential:}") String serviceCredential) {
+        this.serviceCredential = serviceCredential;
+    }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource(
@@ -40,7 +51,8 @@ public class SecurityConfig {
             .filter(origin -> !origin.isEmpty())
             .toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Content-Type", "Authorization"));
+        config.setAllowedHeaders(List.of("Content-Type", "Authorization",
+            ServiceCredentialAuthFilter.HEADER));
         config.setAllowCredentials(false);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
@@ -55,8 +67,14 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers(ServiceCredentialAuthFilter.protectedRequestMatchers())
+                    .hasAuthority(ServiceCredentialAuthFilter.SERVICE_AUTHORITY)
                 .anyRequest().authenticated())
-            .addFilterBefore(new LocalDevAuthFilter(), UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(new LocalDevAuthFilter(), UsernamePasswordAuthenticationFilter.class)
+            // Runs after LocalDevAuthFilter so the SERVICE principal replaces
+            // the fixed dev user on service-credential endpoints.
+            .addFilterBefore(new ServiceCredentialAuthFilter(serviceCredential),
+                UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
@@ -82,9 +100,13 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers(ServiceCredentialAuthFilter.protectedRequestMatchers())
+                    .hasAuthority(ServiceCredentialAuthFilter.SERVICE_AUTHORITY)
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(jwt -> jwt.jwtAuthenticationConverter(wrapped)));
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(wrapped)))
+            .addFilterBefore(new ServiceCredentialAuthFilter(serviceCredential),
+                UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }

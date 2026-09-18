@@ -13,6 +13,10 @@ rollbackshield:
   workqueue: in-memory           # in-memory | sqs
   cors:
     allowed-origins: ${ROLLBACKSHIELD_ALLOWED_ORIGINS:http://localhost:3000}
+  # Shared credential for worker poll/redeem and the SDK policy fetch.
+  # No default here on purpose: under 'aws' it must come from the environment
+  # (ECS task definition / Secrets Manager), and blank fails closed.
+  service-credential: ${ROLLBACKSHIELD_SERVICE_CREDENTIAL:}
   aws:
     region: ${AWS_REGION:us-east-1}
   dynamodb:
@@ -35,6 +39,10 @@ spring:
       on-profile: local
 # Local dev: no Cognito, a fixed dev principal is applied by LocalDevAuthFilter.
 # Never active in the 'aws' profile.
+rollbackshield:
+  # Fixed dev-only value so localhost demos work with zero setup; the SDK and
+  # demo-worker default to the same value.
+  service-credential: ${ROLLBACKSHIELD_SERVICE_CREDENTIAL:local-dev-service-credential}
 
 ---
 spring:

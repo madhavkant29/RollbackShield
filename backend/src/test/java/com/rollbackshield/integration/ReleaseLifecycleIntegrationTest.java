@@ -33,6 +33,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("local")
 class ReleaseLifecycleIntegrationTest {
 
+    private static final String SERVICE_CREDENTIAL_HEADER = "X-RollbackShield-Service-Credential";
+    private static final String LOCAL_DEV_SERVICE_CREDENTIAL = "local-dev-service-credential";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -85,7 +88,8 @@ class ReleaseLifecycleIntegrationTest {
             .andExpect(jsonPath("$.epoch").value(1));
 
         // 4. the SDK's policy endpoint is servable and contains the rule we set
-        mockMvc.perform(get("/api/v1/contracts/" + contractId + "/policy"))
+        mockMvc.perform(get("/api/v1/contracts/" + contractId + "/policy")
+                .header(SERVICE_CREDENTIAL_HEADER, LOCAL_DEV_SERVICE_CREDENTIAL))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.rules[0].type").value("ENUM_ALLOWED_VALUES"))
             .andExpect(jsonPath("$.rules[0].previousVersionSupports").isArray());
@@ -113,9 +117,11 @@ class ReleaseLifecycleIntegrationTest {
         // 8. the job's epoch is now invalid -- redeem must CANCEL, twice, idempotently
         String redeemBody = "{\"releaseId\":\"" + releaseId + "\",\"releaseEpoch\":1}";
         mockMvc.perform(post("/api/v1/work/" + jobId + "/redeem")
+                .header(SERVICE_CREDENTIAL_HEADER, LOCAL_DEV_SERVICE_CREDENTIAL)
                 .contentType("application/json").content(redeemBody))
             .andExpect(jsonPath("$.outcome").value("CANCEL"));
         mockMvc.perform(post("/api/v1/work/" + jobId + "/redeem")
+                .header(SERVICE_CREDENTIAL_HEADER, LOCAL_DEV_SERVICE_CREDENTIAL)
                 .contentType("application/json").content(redeemBody))
             .andExpect(jsonPath("$.outcome").value("CANCEL")); // idempotent, not a second decision
 

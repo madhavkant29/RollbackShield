@@ -25,17 +25,35 @@ import java.util.Set;
  */
 public final class HttpPolicySource implements PolicySource {
 
+    /**
+     * Header carrying the shared service credential. The control plane
+     * requires it on the policy endpoint; a blank/null credential here means
+     * no header is sent and the fetch will be rejected once the server has
+     * a credential configured (it fails closed).
+     */
+    public static final String SERVICE_CREDENTIAL_HEADER = "X-RollbackShield-Service-Credential";
+
     private final HttpClient client;
     private final String baseUrl;
     private final Duration timeout;
+    private final String serviceCredential;
 
     public HttpPolicySource(String baseUrl) {
-        this(baseUrl, Duration.ofSeconds(5));
+        this(baseUrl, Duration.ofSeconds(5), null);
     }
 
     public HttpPolicySource(String baseUrl, Duration timeout) {
+        this(baseUrl, timeout, null);
+    }
+
+    public HttpPolicySource(String baseUrl, String serviceCredential) {
+        this(baseUrl, Duration.ofSeconds(5), serviceCredential);
+    }
+
+    public HttpPolicySource(String baseUrl, Duration timeout, String serviceCredential) {
         this.baseUrl = baseUrl;
         this.timeout = timeout;
+        this.serviceCredential = serviceCredential;
         this.client = HttpClient.newBuilder()
             .connectTimeout(timeout)
             .build();
@@ -44,11 +62,13 @@ public final class HttpPolicySource implements PolicySource {
     @Override
     public PolicySnapshot fetch(String contractId) throws PolicyFetchException {
         URI uri = URI.create(baseUrl + "/api/v1/contracts/" + contractId + "/policy");
-        HttpRequest request = HttpRequest.newBuilder(uri)
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
             .timeout(timeout)
-            .header("Accept", "application/json")
-            .GET()
-            .build();
+            .header("Accept", "application/json");
+        if (serviceCredential != null && !serviceCredential.isBlank()) {
+            builder.header(SERVICE_CREDENTIAL_HEADER, serviceCredential);
+        }
+        HttpRequest request = builder.GET().build();
 
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());

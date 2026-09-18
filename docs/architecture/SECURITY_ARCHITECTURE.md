@@ -7,6 +7,17 @@ Spring's `JwtDecoder` — never hand-decoded) under `aws`; a fixed
 process (`SecurityConfig`'s two `@Profile`-gated filter chains are
 mutually exclusive).
 
+## Frontend sign-in
+The control room signs in through Cognito Hosted UI using Authorization
+Code + PKCE (`frontend/lib/auth.ts`) when `NEXT_PUBLIC_COGNITO_DOMAIN` and
+`NEXT_PUBLIC_COGNITO_CLIENT_ID` are configured; it attaches
+`Authorization: Bearer <access token>` to every API call and refreshes the
+token before expiry. No client secret is used (public SPA client). When
+those variables are unset (local dev) the app sends no token and talks to
+the `local` profile. The Bearer-attachment path is covered by
+`frontend/e2e/auth.spec.ts`; a real Hosted UI round-trip is not yet
+exercised (LIMITATIONS.md).
+
 ## AuthZ / tenant scoping
 Every principal carries `organizationId` from a Cognito custom claim
 (`custom:organization_id`), never a client-supplied value. Every
@@ -20,11 +31,22 @@ confirms the resource exists to an unauthorized caller).
 `ContractController`'s create/get were missing this check when first
 written; found during doc review and fixed in the same pass.
 
-## Known open gaps
-- `GET /work/poll`, `POST /work/{jobId}/redeem` — worker-trust, not
-  per-tenant; need a service credential, not a user JWT.
-- `GET /contracts/{contractId}/policy` — the SDK sends no auth header;
-  an unguessable UUID is the only protection today.
+## Service-credential endpoints
+`GET /work/poll`, `POST /work/{jobId}/redeem`, and
+`GET /contracts/{contractId}/policy` are called by infrastructure, not a
+tenant user, so they are not organization-scoped. They require the shared
+credential in `X-RollbackShield-Service-Credential`, checked in constant
+time by `ServiceCredentialAuthFilter` and authorized by the `SERVICE`
+authority the filter grants. A user JWT cannot reach them, and a valid
+service credential grants nothing on tenant endpoints (the filter only
+authenticates those paths; everything else still needs a user principal).
+Under `local` the credential defaults to `local-dev-service-credential`;
+under `aws` there is deliberately no default — blank fails closed and
+every service call is rejected. The SDK (`HttpPolicySource`) and
+`demo-worker` send it from `ROLLBACKSHIELD_SERVICE_CREDENTIAL`.
+
+Remaining hardening (tracked, not hidden): one shared secret rather than a
+per-contract credential; rotation guidance lives in `RUNBOOK.md`.
 
 ## CORS
 The control room is a separate origin from the control plane. Allowed

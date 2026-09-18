@@ -22,13 +22,16 @@ import java.time.Duration;
 public final class WorkerMain {
 
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
+    private static final String SERVICE_CREDENTIAL_HEADER = "X-RollbackShield-Service-Credential";
 
     public static void main(String[] args) throws Exception {
         String baseUrl = args.length > 0 ? args[0] : "http://localhost:8080";
+        String serviceCredential = System.getenv().getOrDefault(
+            "ROLLBACKSHIELD_SERVICE_CREDENTIAL", "local-dev-service-credential");
         System.out.println("demo-worker polling " + baseUrl + "/api/v1/work/poll every 2s (Ctrl+C to stop)");
 
         while (true) {
-            String body = get(baseUrl + "/api/v1/work/poll?max=10");
+            String body = get(baseUrl + "/api/v1/work/poll?max=10", serviceCredential);
             // Minimal, dependency-free scan for job objects; the demo-app's
             // ControlPlaneClient uses the SDK's MinimalJson for the same
             // purpose -- kept separate here since this module intentionally
@@ -41,9 +44,11 @@ public final class WorkerMain {
         }
     }
 
-    private static String get(String url) throws IOException, InterruptedException {
+    private static String get(String url, String serviceCredential) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-            .timeout(Duration.ofSeconds(5)).GET().build();
+            .timeout(Duration.ofSeconds(5))
+            .header(SERVICE_CREDENTIAL_HEADER, serviceCredential)
+            .GET().build();
         HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
         return response.body();
     }

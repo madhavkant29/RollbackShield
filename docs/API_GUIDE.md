@@ -5,6 +5,14 @@ Auth: under the `local` Spring profile every request is treated as a fixed
 dev principal (no token needed). Under `aws`, every request needs a valid
 Cognito JWT (`Authorization: Bearer <token>`).
 
+Three endpoints are worker/infrastructure calls rather than tenant calls
+(`GET /work/poll`, `POST /work/{jobId}/redeem`,
+`GET /contracts/{contractId}/policy`) and require the shared service
+credential in `X-RollbackShield-Service-Credential` instead of a JWT.
+Locally it defaults to `local-dev-service-credential`; under `aws` it is
+`ROLLBACKSHIELD_SERVICE_CREDENTIAL` with no default (blank fails closed).
+Missing/invalid → `401 INVALID_SERVICE_CREDENTIAL`.
+
 All responses are JSON. Errors follow the structured shape in
 `shared.api.ApiError` — always `{code, message, timestamp, requestId,
 details}`; clients should switch on `code`, never parse `message`.
@@ -38,6 +46,7 @@ POST /api/v1/releases/{releaseId}/contracts
 
 GET  /api/v1/contracts/{contractId}                                  → 200 ContractResponse
 GET  /api/v1/contracts/{contractId}/policy                           → 200 PolicyResponse
+     (requires the service credential — see Auth above)
 ```
 `GET .../policy` is the ONE endpoint the Java SDK calls — only from its
 background `PolicyCache` refresh, never per mutation. See
@@ -55,9 +64,9 @@ Rule shapes (discriminated by `type`):
 ## Work fencing
 
 ```
-POST /api/v1/releases/{releaseId}/work   {"jobType","payload"}       → 201 {jobId, releaseId, releaseEpoch, ...}
-GET  /api/v1/work/poll?max=10                                        → 200 WorkJobResponse[]
-POST /api/v1/work/{jobId}/redeem  {"releaseId","releaseEpoch"}        → 200 {jobId, outcome: EXECUTE|CANCEL}
+POST /api/v1/releases/{releaseId}/work   {"jobType","payload"}       → 201 {jobId, releaseId, releaseEpoch, ...}   (user/JWT)
+GET  /api/v1/work/poll?max=10                                        → 200 WorkJobResponse[]                       (service credential)
+POST /api/v1/work/{jobId}/redeem  {"releaseId","releaseEpoch"}        → 200 {jobId, outcome: EXECUTE|CANCEL}        (service credential)
 ```
 
 ## Reversibility & audit
@@ -74,4 +83,5 @@ GET /api/v1/releases/{releaseId}/audit          → 200 AuditEventResponse[]
 `STATE_TRANSITION_FAILED` (409, concurrent write — retry),
 `CONTRACT_VERSION_CONFLICT` (409, release already has an active contract),
 `INVALID_ROLLBACK_CONTRACT`, `VALIDATION_FAILED` (400, field errors in
-`details`), `INTERNAL_ERROR` (500, unexpected).
+`details`), `INVALID_SERVICE_CREDENTIAL` (401, worker/SDK endpoints),
+`INTERNAL_ERROR` (500, unexpected).

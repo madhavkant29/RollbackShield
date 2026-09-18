@@ -34,6 +34,10 @@ public final class ProtectedDemo {
     private static final String BASE_URL =
         System.getenv().getOrDefault("ROLLBACKSHIELD_CONTROL_PLANE_URL", "http://localhost:8080");
 
+    /** Must match the control plane's configured service credential. */
+    private static final String SERVICE_CREDENTIAL =
+        System.getenv().getOrDefault("ROLLBACKSHIELD_SERVICE_CREDENTIAL", "local-dev-service-credential");
+
     public static void main(String[] args) {
         ControlPlaneClient controlPlane = new ControlPlaneClient(BASE_URL);
 
@@ -123,7 +127,7 @@ public final class ProtectedDemo {
     }
 
     private static RollbackGuard buildGuard(String contractId) {
-        HttpPolicySource source = new HttpPolicySource(BASE_URL);
+        HttpPolicySource source = new HttpPolicySource(BASE_URL, SERVICE_CREDENTIAL);
         EnforcementConfig config = EnforcementConfig.enforceFailClosed();
         PolicyCache cache = new PolicyCache(contractId, source, config);
         cache.initialize(); // the one real network call in this whole method, done once, up front
