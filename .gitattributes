@@ -1,0 +1,26 @@
+# Normalize line endings in the repository; check out native on Windows
+# only for files that require CRLF (Windows scripts).
+* text=auto
+
+# Shell and Unix scripts must stay LF even on Windows checkouts.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows scripts.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files -- never diff or normalize.
+*.jar binary
+*.war binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+
+# Keep generated lockfiles out of language stats noise.
+package-lock.json linguist-generated=true

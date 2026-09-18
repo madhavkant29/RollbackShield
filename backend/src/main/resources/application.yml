@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: rollbackshield-backend
+  profiles:
+    active: local
+
+server:
+  port: 8080
+
+rollbackshield:
+  persistence: in-memory        # in-memory | dynamodb
+  events: logging               # logging | eventbridge
+  workqueue: in-memory           # in-memory | sqs
+  cors:
+    allowed-origins: ${ROLLBACKSHIELD_ALLOWED_ORIGINS:http://localhost:3000}
+  aws:
+    region: ${AWS_REGION:us-east-1}
+  dynamodb:
+    table-name: ${ROLLBACKSHIELD_TABLE_NAME:rollbackshield}
+  eventbridge:
+    bus-name: ${ROLLBACKSHIELD_EVENT_BUS:rollbackshield-events}
+  sqs:
+    queue-url: ${ROLLBACKSHIELD_WORK_QUEUE_URL:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+# Local dev: no Cognito, a fixed dev principal is applied by LocalDevAuthFilter.
+# Never active in the 'aws' profile.
+
+---
+spring:
+  config:
+    activate:
+      on-profile: aws
+security:
+  oauth2:
+    resourceserver:
+      jwt:
+        issuer-uri: ${COGNITO_ISSUER_URI}
+rollbackshield:
+  persistence: dynamodb
+  events: eventbridge
+  workqueue: sqs

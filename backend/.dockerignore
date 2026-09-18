@@ -1,0 +1,15 @@
+# Docker build context is backend/. The image only needs the pre-built
+# executable jar under target/ (the Dockerfile COPYs it), so target/ must
+# NOT be listed here -- doing so breaks the build.
+.git
+.gitignore
+.gitattributes
+*.log
+*.pid
+.idea/
+.vscode/
+*.iml
+HELP.md
+.mvn/
+mvnw
+mvnw.cmd

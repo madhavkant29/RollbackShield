@@ -1,0 +1,15 @@
+# AWS CDK synthesis output and staged assets
+cdk.out/
+.cdk.staging/
+
+# Compiled TypeScript output
+*.js
+*.d.ts
+!jest.config.js
+!cdk.json
+
+# dependencies
+node_modules/
+
+# CDK context is generated per-account/region and machine-specific
+cdk.context.json
