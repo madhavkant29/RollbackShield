@@ -39,7 +39,7 @@ public final class ProtectedDemo {
         System.getenv().getOrDefault("ROLLBACKSHIELD_SERVICE_CREDENTIAL", "local-dev-service-credential");
 
     public static void main(String[] args) {
-        ControlPlaneClient controlPlane = new ControlPlaneClient(BASE_URL);
+        ControlPlaneClient controlPlane = new ControlPlaneClient(BASE_URL, SERVICE_CREDENTIAL);
 
         Map<String, Order> backingStore = new HashMap<>();
         OrderStoreV2 v2Store = new OrderStoreV2(backingStore);

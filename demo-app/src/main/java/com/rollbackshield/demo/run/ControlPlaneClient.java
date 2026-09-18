@@ -15,37 +15,45 @@ import java.util.Map;
  * earlier shortcut where the demo called backend AuditTrail /
  * ReversibilityEvaluator classes directly in-process -- every control-plane
  * interaction below crosses the actual HTTP boundary, the same one a real
- * external application would use. Auth: under the 'local' Spring profile the
- * backend's LocalDevAuthFilter accepts any request with no token, so no
- * credential handling is needed here for local runs.
+ * external application would use.
+ *
+ * Sends the shared service credential on every call: the worker endpoints
+ * (poll/redeem) require it, and the tenant endpoints simply ignore an
+ * unknown header. Under the 'local' profile the credential defaults to the
+ * same dev value the backend uses.
  */
 final class ControlPlaneClient {
 
+    static final String SERVICE_CREDENTIAL_HEADER = "X-RollbackShield-Service-Credential";
+
     private final HttpClient client = HttpClient.newHttpClient();
     private final String baseUrl;
+    private final String serviceCredential;
 
-    ControlPlaneClient(String baseUrl) {
+    ControlPlaneClient(String baseUrl, String serviceCredential) {
         this.baseUrl = baseUrl;
+        this.serviceCredential = serviceCredential;
     }
 
     Map<String, Object> post(String path, String jsonBody) {
-        return send(HttpRequest.newBuilder(URI.create(baseUrl + path))
+        return send(withCredential(HttpRequest.newBuilder(URI.create(baseUrl + path))
             .timeout(Duration.ofSeconds(5))
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/json"))
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody)));
     }
 
     Map<String, Object> get(String path) {
-        return send(HttpRequest.newBuilder(URI.create(baseUrl + path))
-            .timeout(Duration.ofSeconds(5))
+        return send(withCredential(HttpRequest.newBuilder(URI.create(baseUrl + path))
+            .timeout(Duration.ofSeconds(5)))
             .GET());
     }
 
     /** For endpoints that return a JSON array (e.g. audit history). */
     java.util.List<Object> getList(String path) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
-                .timeout(Duration.ofSeconds(5)).GET().build();
+            HttpRequest request = withCredential(HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .timeout(Duration.ofSeconds(5)))
+                .GET().build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             checkStatus(path, response);
             return MinimalJson.parseObject("{\"_\":" + response.body() + "}").get("_") instanceof java.util.List<?> l
@@ -58,10 +66,18 @@ final class ControlPlaneClient {
         }
     }
 
+    private HttpRequest.Builder withCredential(HttpRequest.Builder builder) {
+        if (serviceCredential != null && !serviceCredential.isBlank()) {
+            builder.header(SERVICE_CREDENTIAL_HEADER, serviceCredential);
+        }
+        return builder;
+    }
+
     private Map<String, Object> send(HttpRequest.Builder builder) {
         try {
-            HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-            checkStatus(builder.build().uri().toString(), response);
+            HttpRequest request = builder.build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            checkStatus(request.uri().toString(), response);
             return MinimalJson.parseObject(response.body());
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
