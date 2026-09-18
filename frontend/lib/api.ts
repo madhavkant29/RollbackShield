@@ -1,3 +1,5 @@
+import { getAccessToken } from '@/lib/auth';
+
 const API_BASE = process.env.NEXT_PUBLIC_ROLLBACKSHIELD_API_URL ?? 'http://localhost:8080';
 
 export type ReleaseState =
@@ -78,9 +80,16 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Cognito access token when the control room is configured for it; null
+  // under the local profile, where the backend accepts the dev principal.
+  const token = await getAccessToken();
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
     cache: 'no-store',
   });
   if (!response.ok) {

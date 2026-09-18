@@ -1,7 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import {
+  authConfigured,
+  completeSignInIfCallback,
+  isSignedIn,
+  signIn,
+  signOut,
+} from '@/lib/auth';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Overview' },
@@ -14,6 +21,12 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const [open, setOpen] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    // Handles the redirect back from Cognito, then reflects sign-in state.
+    void completeSignInIfCallback().finally(() => setSignedIn(isSignedIn()));
+  }, []);
 
   return (
     <>
@@ -68,8 +81,20 @@ export function Sidebar() {
             </li>
           ))}
         </ul>
-        <div className="border-t border-border p-3 text-xs text-ink-tertiary">
-          v0.1 · local
+        <div className="flex items-center justify-between border-t border-border p-3 text-xs text-ink-tertiary">
+          {authConfigured ? (
+            <>
+              <span>{signedIn ? 'signed in' : 'signed out'}</span>
+              <button
+                onClick={signedIn ? signOut : signIn}
+                className="text-accent hover:underline"
+              >
+                {signedIn ? 'Sign out' : 'Sign in'}
+              </button>
+            </>
+          ) : (
+            <span>v0.1 · local</span>
+          )}
         </div>
       </nav>
     </>
