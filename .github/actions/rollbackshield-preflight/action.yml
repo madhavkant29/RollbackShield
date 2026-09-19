@@ -1,0 +1,80 @@
+name: RollbackShield preflight
+description: >
+  Observe the connected runtime, create (or reuse) the release for this
+  deployment, and evaluate reversibility. The job fails when RollbackShield
+  returns CANNOT_ROLLBACK. All decisions come from the control-plane API;
+  this action contains no local compatibility logic.
+
+inputs:
+  api-url:
+    description: RollbackShield control-plane base URL
+    required: true
+  token:
+    description: Cognito access token (or the local dev token)
+    required: true
+  service-id:
+    description: RollbackShield service id (from `rollbackshield services list`)
+    required: true
+  fail-on-unknown:
+    description: Treat an UNKNOWN verdict as a failure too (recommended)
+    required: false
+    default: "true"
+
+outputs:
+  release-id:
+    description: The release preflight was evaluated for
+    value: ${{ steps.preflight.outputs.release-id }}
+  verdict:
+    description: CAN_ROLLBACK | CANNOT_ROLLBACK | UNKNOWN
+    value: ${{ steps.preflight.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - name: Observe deployment and create the release
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="${{ inputs.api-url }}"
+        auth="Authorization: Bearer ${{ inputs.token }}"
+
+        # The release is created from what the connected runtime actually reports.
+        observation=$(curl -sf -X POST "$base/api/v1/services/${{ inputs.service-id }}/observations" \
+          -H "$auth" -H 'Content-Type: application/json')
+        echo "observed: $(echo "$observation" | jq -c .)"
+
+        release=$(curl -sf -X POST "$base/api/v1/services/${{ inputs.service-id }}/releases" \
+          -H "$auth" -H 'Content-Type: application/json')
+        echo "$release" | jq -c .
+        echo "release-id=$(echo "$release" | jq -r .releaseId)" >> "$GITHUB_ENV"
+
+    - name: Evaluate reversibility preflight
+      id: preflight
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="${{ inputs.api-url }}"
+        auth="Authorization: Bearer ${{ inputs.token }}"
+
+        report=$(curl -sf "$base/api/v1/releases/$RELEASE_ID/reversibility" -H "$auth")
+        echo "$report" | jq -c '.checks'
+
+        verdict=$(echo "$report" | jq -r .verdict)
+        echo "release-id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+        echo "RollbackShield verdict: $verdict ($(echo "$report" | jq -r .status))"
+
+        blockers=$(echo "$report" | jq -r '.checks[] | select(.passed == false) | "  [\(.blockerCode)] \(.blockerDescription)"')
+        if [ -n "$blockers" ]; then
+          echo "Blockers:"
+          echo "$blockers"
+        fi
+
+        if [ "$verdict" = "CANNOT_ROLLBACK" ]; then
+          echo "::error::RollbackShield preflight blocked this deployment"
+          exit 1
+        fi
+        if [ "$verdict" = "UNKNOWN" ] && [ "${{ inputs.fail-on-unknown }}" = "true" ]; then
+          echo "::error::RollbackShield could not prove this deployment is reversible"
+          exit 1
+        fi

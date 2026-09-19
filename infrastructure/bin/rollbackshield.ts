@@ -6,6 +6,7 @@ import { DataStack } from '../lib/data-stack';
 import { IdentityStack } from '../lib/identity-stack';
 import { ControlPlaneStack } from '../lib/control-plane-stack';
 import { ObservabilityStack } from '../lib/observability-stack';
+import { DemoStack } from '../lib/demo-stack';
 
 const app = new cdk.App();
 
@@ -38,4 +39,14 @@ new ObservabilityStack(app, `RollbackShield-Observability-${envName}`, {
   tags,
   service: controlPlane.service,
   loadBalancer: controlPlane.loadBalancer,
+});
+
+// Demo target for the live verification (docs/operations/AWS_DEPLOYMENT.md
+// §4.5). Deployed by default so `cdk deploy --all` leaves nothing to create
+// by hand; destroy with `cdk destroy RollbackShield-Demo-<envName>`.
+new DemoStack(app, `RollbackShield-Demo-${envName}`, {
+  env,
+  tags,
+  vpc: network.vpc,
+  controlPlaneTaskRole: controlPlane.taskRole,
 });

@@ -1,0 +1,55 @@
+name: RollbackShield status
+description: >
+  Query the final status of a release: its lifecycle state and the live
+  reversibility verdict, with every blocker. Exits non-zero when the release
+  cannot roll back. Reads the control-plane API only.
+
+inputs:
+  api-url:
+    description: RollbackShield control-plane base URL
+    required: true
+  token:
+    description: Cognito access token (or the local dev token)
+    required: true
+  release-id:
+    description: Release id to inspect
+    required: true
+
+outputs:
+  status:
+    description: Lifecycle state (PROTECTED_ROLLOUT, ROLLED_BACK, COMMITTED, FAILED, ...)
+    value: ${{ steps.status.outputs.status }}
+  verdict:
+    description: CAN_ROLLBACK | CANNOT_ROLLBACK | UNKNOWN
+    value: ${{ steps.status.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - name: Query release and reversibility
+      id: status
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="${{ inputs.api-url }}"
+        auth="Authorization: Bearer ${{ inputs.token }}"
+        release_id="${{ inputs.release-id }}"
+
+        release=$(curl -sf "$base/api/v1/releases/$release_id" -H "$auth")
+        report=$(curl -sf "$base/api/v1/releases/$release_id/reversibility" -H "$auth")
+
+        state=$(echo "$release" | jq -r .state)
+        verdict=$(echo "$report" | jq -r .verdict)
+        echo "status=$state" >> "$GITHUB_OUTPUT"
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+        echo "release $release_id"
+        echo "  versions: $(echo "$release" | jq -r '.previousVersionLabel') -> $(echo "$release" | jq -r '.candidateVersionLabel')"
+        echo "  state:    $state (epoch $(echo "$release" | jq -r .epoch))"
+        echo "  verdict:  $verdict ($(echo "$report" | jq -r .status))"
+        echo "$report" | jq -r '.checks[] | "  \(if .passed then "PASS" else "FAIL" end)  \(.name)\(if .blockerCode then " [\(.blockerCode)] \(.blockerDescription)" else "" end)"'
+
+        if [ "$verdict" = "CANNOT_ROLLBACK" ]; then
+          echo "::error::release $release_id cannot roll back"
+          exit 1
+        fi

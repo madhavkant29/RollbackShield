@@ -69,12 +69,50 @@ GET  /api/v1/work/poll?max=10                                        → 200 Wor
 POST /api/v1/work/{jobId}/redeem  {"releaseId","releaseEpoch"}        → 200 {jobId, outcome: EXECUTE|CANCEL}        (service credential)
 ```
 
+## Integrations & connectors
+
+```
+POST   /api/v1/integrations                        {name,type,endpoint,credential,configuration} → 201 Integration (CONNECTING)
+GET    /api/v1/integrations                        → 200 Integration[]
+GET    /api/v1/integrations/{id}                   → 200 Integration
+POST   /api/v1/integrations/{id}/test              → 200 {success,message,checkedAt,details}   (real provider call)
+POST   /api/v1/integrations/{id}/sync              → 200 {discoveredCount,errorCount,errors[]} (partial failure keeps previous state)
+POST   /api/v1/integrations/{id}/disconnect        → 200 Integration (DISCONNECTED)
+DELETE /api/v1/integrations/{id}                   → 204
+GET    /api/v1/integrations/{id}/resources?type=X  → 200 DiscoveredResource[]
+GET    /api/v1/integrations/{id}/services          → 200 DiscoveredResource[] (importable runtimes)
+```
+
+`credential` is always a reference: `{kind, secretReference?, roleArn?, externalId?}`.
+Kinds: `NONE`, `AWS_CONTROL_PLANE_ROLE`, `AWS_ASSUME_ROLE`, `GITHUB_APP`,
+`GITHUB_TOKEN`, `KUBERNETES_KUBECONFIG`, `POSTGRES_PASSWORD`. No secret value is accepted or returned.
+
+## Service mapping & deployment observation
+
+```
+POST   /api/v1/services/import                     {integrationId,resourceExternalId,name?} → 201 {serviceId,...,mapping}
+GET    /api/v1/services/{serviceId}/mapping        → 200 {serviceId,bindings:[{role,integrationId,resourceType,externalId,confidence,evidence,boundAt}]}
+POST   /api/v1/services/{serviceId}/mapping/bindings  {role,integrationId,externalId,evidence?} → 200 Mapping
+DELETE /api/v1/services/{serviceId}/mapping/bindings?role=&externalId= → 200 Mapping
+POST   /api/v1/services/{serviceId}/observations   → 201 DeploymentObservation + {releaseId, releaseState, releaseCreated}
+       (automatic workflow: creates or reuses the release, advances it to READY, runs the first preflight)
+GET    /api/v1/services/{serviceId}/observations   → 200 {observations:[...]}
+GET    /api/v1/services/{serviceId}/observations/latest → 200 DeploymentObservation
+POST   /api/v1/services/{serviceId}/releases       → 201 {releaseId,previousVersionLabel,candidateVersionLabel,state} (idempotent)
+```
+
 ## Reversibility & audit
 
 ```
-GET /api/v1/releases/{releaseId}/reversibility  → 200 {releaseId, status, checks:[{name,passed,blockerCode,blockerDescription}]}
+GET /api/v1/releases/{releaseId}/reversibility  → 200 {releaseId, status, verdict, checks:[{name,passed,blockerCode,blockerDescription,blockerSeverity}], evidence:[{subject,relation,object,source,detail}], evaluatedAt}
 GET /api/v1/releases/{releaseId}/audit          → 200 AuditEventResponse[]
 ```
+
+`verdict` is `CAN_ROLLBACK | CANNOT_ROLLBACK | UNKNOWN`; never a score.
+`POST /releases/{releaseId}/rollback` executes through the rollback
+orchestrator: it verifies the artifact, asks the runtime connector to
+restore the previous revision, monitors convergence and verifies health.
+Failure yields `FAILED` with the exact step, never `ROLLED_BACK`.
 
 ## Error codes
 
@@ -85,3 +123,19 @@ GET /api/v1/releases/{releaseId}/audit          → 200 AuditEventResponse[]
 `INVALID_ROLLBACK_CONTRACT`, `VALIDATION_FAILED` (400, field errors in
 `details`), `INVALID_SERVICE_CREDENTIAL` (401, worker/SDK endpoints),
 `INTERNAL_ERROR` (500, unexpected).
+
+Connector and mapping error codes:
+
+- `CONNECTOR_NOT_IMPLEMENTED` (404/400) — no connector for that
+  `ConnectorType`, or the type is not implemented by this build.
+- `CAPABILITY_NOT_SUPPORTED` (409) — the connector does not declare the
+  requested capability.
+- `INVALID_CREDENTIAL_REFERENCE` (400) — credential kind not valid for the
+  connector type, or a required reference field is missing.
+- `CREDENTIAL_UNAVAILABLE` (400) — the referenced secret could not be
+  resolved (local: environment variable unset; AWS: Secrets Manager).
+- `INVALID_INTEGRATION` (400), `INVALID_BINDING_ROLE` (400),
+  `INVALID_RESOURCE_TYPE` (400).
+- `INTEGRATION_NOT_FOUND`, `RESOURCE_NOT_FOUND` (404 — usually "sync
+  first"), `DEPLOYMENT_NOT_OBSERVED` (404/409), `SERVICE_NOT_MAPPED` /
+  `RUNTIME_NOT_MAPPED` (409 — import and map a runtime first).

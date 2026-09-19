@@ -20,7 +20,33 @@ Enforced by `ModuleBoundaryTest` (ArchUnit), not just this document.
   api/           @RestController + DTOs
 ```
 
+## Current modules
+
+Lifecycle and enforcement: `catalog` (orgs/services), `release`,
+`contract`, `reversibility`, `rollback`, `workfence`, `audit`,
+`enforcement`, `identity`, `shared`.
+
+Connectivity: `integrations` (Integration, mapping, discovery,
+observation domain + application + API), `servicemapping`,
+`deployment`, plus `connectors/<provider>/` which contains the only
+provider SDK code:
+
+```
+connectors/aws/adapter/         AWS SDK (ECS, ECR, SQS, EventBridge, CloudWatch, STS)
+connectors/github/adapter/      GitHub REST over java.net.http
+connectors/kubernetes/adapter/  fabric8
+connectors/postgres/adapter/    JDBC (org.postgresql)
+connectors/flyway/domain/       pure deterministic SQL classification
+connectors/flyway/adapter/      directory/port wiring
+```
+
+`connectors/*` is downstream of `integrations.domain` only: core
+release/reversibility code must not import anything under `connectors/`.
+Application-layer connector access goes through `ConnectorRegistry`,
+never through a provider class.
+
 ## Adding a new module
 Copy this shape. If the module has no persistence of its own (e.g.
 `enforcement`), it can omit `adapter/`/`api/`. Never put persistence
-details in `domain/`, never put HTTP concerns in `application/`.
+details in `domain/`, never put HTTP concerns in `application/`, and
+never add a provider SDK import outside `connectors/<provider>/adapter/`.

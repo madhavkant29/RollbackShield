@@ -264,6 +264,157 @@ Send me the `logs tail` output if the task is failing to start.
 
 ---
 
+## 4.5 Connected end-to-end verification (the live-run checklist)
+
+This turns the ECS/ECR adapters from contract-tested into live-verified. All
+demo resources are created by CDK (`RollbackShield-Demo-dev`): an ECR
+repository, an ECS Fargate cluster with two task-definition revisions, a
+service (starting at 0 tasks), a demo SQS queue and a CloudWatch log group.
+**Do not create any of it by hand.** Every AWS command uses the profile
+alias `rollbackshield-deploy` from §2.3; substitute your region if it is
+not `us-east-1`.
+
+### 1. Deploy everything
+
+```
+npx cdk deploy --all --profile rollbackshield-deploy
+```
+
+Expected: six stacks deploy (`Network`, `Data`, `Identity`, `ControlPlane`,
+`Observability`, `Demo`), ending with outputs including:
+
+```
+RollbackShield-Demo-dev.DemoClusterName = rollbackshield-demo
+RollbackShield-Demo-dev.DemoServiceName = payments
+RollbackShield-Demo-dev.DemoRepositoryUri = <account>.dkr.ecr.<region>.amazonaws.com/rollbackshield-demo-payments
+RollbackShield-Demo-dev.DemoLogGroup = /rollbackshield/demo-payments
+✅  RollbackShield-Demo-dev
+```
+
+Note the `DemoRepositoryUri` and the control-plane ALB DNS output from
+`RollbackShield-ControlPlane-dev.LoadBalancerDns`.
+
+### 2. Push the two images into the CDK-created repository
+
+```
+aws ecr get-login-password --region <aws-region> --profile rollbackshield-deploy | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
+docker pull public.ecr.aws/nginx/nginx:1.25
+docker tag public.ecr.aws/nginx/nginx:1.25 <account>.dkr.ecr.<region>.amazonaws.com/rollbackshield-demo-payments:v1
+docker push <account>.dkr.ecr.<region>.amazonaws.com/rollbackshield-demo-payments:v1
+docker pull public.ecr.aws/nginx/nginx:1.27
+docker tag public.ecr.aws/nginx/nginx:1.27 <account>.dkr.ecr.<region>.amazonaws.com/rollbackshield-demo-payments:v2
+docker push <account>.dkr.ecr.<region>.amazonaws.com/rollbackshield-demo-payments:v2
+aws ecr describe-images --repository-name rollbackshield-demo-payments --region <aws-region> --profile rollbackshield-deploy --query "imageDetails[].{tags:imageTags,digest:imageDigest}"
+```
+
+Expected: `docker push` ends with `...: digest: sha256:<...> size: ...` for
+both tags, and `describe-images` returns two entries, `[v1]` and `[v2]`,
+each with a digest.
+
+### 3. Start the service on revision 2 (candidate), revision 1 is previous
+
+```
+aws ecs update-service --cluster rollbackshield-demo --service payments --task-definition rollbackshield-demo-payments:2 --desired-count 1 --region <aws-region> --profile rollbackshield-deploy
+aws ecs wait services-stable --cluster rollbackshield-demo --services payments --region <aws-region> --profile rollbackshield-deploy
+aws ecs describe-services --cluster rollbackshield-demo --services payments --region <aws-region> --profile rollbackshield-deploy --query "services[0].{taskDefinition:taskDefinition,desired:desiredCount,running:runningCount}"
+```
+
+Expected last line:
+
+```
+{"desired": 1, "running": 1, "taskDefinition": "arn:aws:ecs:<region>:<account>:task-definition/rollbackshield-demo-payments:2"}
+```
+
+### 4. Connect AWS in RollbackShield and observe
+
+Sign in to the control room (Cognito Hosted UI through the ALB URL), then
+**Integrations → Connect system → AWS**, endpoint `<region>`, credential
+`AWS_CONTROL_PLANE_ROLE`, name `aws-live`. The task role already has the
+observation and rollback permissions from
+`infrastructure/lib/control-plane-stack.ts`.
+
+Expected after **Test**: `CONNECTED · HEALTHY` and message
+`sts:GetCallerIdentity ok for account <account>`. A connection that cannot
+be verified stays `CONNECTING`/`ERROR` with the STS message -- never a fake
+`CONNECTED`.
+
+Then **Sync** → **Resources**: expect `RUNTIME_CLUSTER` `rollbackshield-demo`,
+`RUNTIME_SERVICE` `rollbackshield-demo/payments`, an `ARTIFACT_REPOSITORY`
+`rollbackshield-demo-payments`, the `QUEUE` `rollbackshield-demo-jobs`,
+`EVENT_BUS` `rollbackshield-events`, and `LOG_GROUP`
+`/rollbackshield/demo-payments`. **Import as service** `payments`.
+
+### 5. Observe → release → preflight
+
+In the service row: **Observe deployment** then **Create release from
+observation**. Expected: candidate
+`arn:aws:ecs:...:task-definition/rollbackshield-demo-payments:2`, previous
+`...:1`, and the digests resolved from the pushed tags via ECR.
+
+Open the control room and activate a contract. Expected preflight:
+
+```
+status REVERSIBLE   verdict CAN_ROLLBACK
+PASS Database compatibility        (no migration source mapped -> will read
+                                    MIGRATION_ANALYSIS_UNAVAILABLE/UNKNOWN if
+                                    no GitHub repo is mapped; that is expected)
+PASS Compute restore path          rollback-target task-definition:1
+PASS Rollback artifact availability sha256:<v1 digest> exists-in ...
+PASS Runtime health observability
+```
+
+If you mapped a GitHub repository with a destructive migration, the
+Database check becomes `CANNOT_ROLLBACK / DESTRUCTIVE_DATABASE_MIGRATION`;
+that is the product working, not a failure.
+
+### 6. Roll back and verify
+
+Click **Roll back** (or `rollbackshield rollback <serviceId>`). Expected:
+the release ends `ROLLED_BACK`, and:
+
+```
+aws ecs describe-services --cluster rollbackshield-demo --services payments --region <aws-region> --profile rollbackshield-deploy --query "services[0].taskDefinition"
+```
+
+returns `"arn:aws:ecs:<region>:<account>:task-definition/rollbackshield-demo-payments:1"`.
+The audit trail shows `ROLLBACK_EXECUTION_STEP` and `ROLLBACK_COMPLETED`.
+A rollout that fails health checks ends `FAILED` with the ECS reason --
+that is also correct behavior, not a bug.
+
+### 7. Record and close out
+
+Paste the outputs of steps 1-6 into the PR/issue, then remove the "No live
+AWS run" entry from `docs/product/LIMITATIONS.md`. Tear the demo down with:
+
+```
+npx cdk destroy RollbackShield-Demo-dev --profile rollbackshield-deploy
+```
+
+(The ECR repository is created with `autoDeleteImages`/`emptyOnDelete`, so
+teardown removes the pushed images too.)
+
+### Customer-account mode (production path, not the hackathon run)
+
+Create a role in the customer account trusted by the RollbackShield task
+role with an external id, and use `AWS_ASSUME_ROLE`:
+
+```
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"AWS": "arn:aws:iam::<rollbackshield-account>:role/<task-role-name>"},
+    "Action": "sts:AssumeRole",
+    "Condition": {"StringLike": {"sts:ExternalId": "rollbackshield-*"}}
+  }]
+}
+```
+
+The role needs the read-only observation actions plus `ecs:UpdateService`
+if rollback execution is delegated. RollbackShield sets the session name
+`rollbackshield-observation` so customer CloudTrail shows exactly who
+assumed it.
+
 ## 5. What I need from you if something fails
 
 For any step above, paste:

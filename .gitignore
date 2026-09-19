@@ -60,3 +60,6 @@ tmp/
 coverage/
 surefire-reports/
 failsafe-reports/
+
+# --- CDK context (caches real account ids) ----------------------------------
+infrastructure/cdk.context.json

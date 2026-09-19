@@ -1,0 +1,19 @@
+{
+  "name": "rollbackshield-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RollbackShield automation CLI: calls the real control-plane API",
+  "type": "module",
+  "bin": {
+    "rollbackshield": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.9",
+    "typescript": "5.5.4"
+  }
+}

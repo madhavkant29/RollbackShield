@@ -1,23 +1,23 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * The §26 control-room flow end to end against a live backend: create a
- * service, walk a release to READY, activate a rollback contract (which
- * moves it to PROTECTED_ROLLOUT), roll back, and see the real audit trail.
- * This is the committed counterpart to the manual browser check that first
- * surfaced the missing CORS config and missing contract UI.
+ * The control-room flow end to end against a live backend (local profile):
+ * create a service, walk a release to READY, activate a rollback contract
+ * (PROTECTED_ROLLOUT), roll back, and see the real timeline.
  */
 test('service -> release -> contract -> rollback', async ({ page }) => {
   const serviceName = 'e2e-checkout-' + Date.now().toString().slice(-8);
 
+  // Services are the entry point; manual creation is the documented dev fallback.
   await page.goto('/services');
-  await page.getByPlaceholder('Service name, e.g. checkout').fill(serviceName);
-  await page.getByRole('button', { name: 'Add service' }).click();
+  await page.getByPlaceholder('Manual service name (local dev only)').fill(serviceName);
+  await page.getByRole('button', { name: 'Create manually' }).click();
   await expect(page.getByText(serviceName)).toBeVisible();
 
-  // Overview links a service to its release list.
-  await page.goto('/');
-  await page.getByRole('link', { name: new RegExp(serviceName) }).click();
+  // Open the service just created (scope to its row; other runs leave services).
+  const row = page.getByRole('row', { name: new RegExp(serviceName) });
+  await row.getByRole('button', { name: 'Open' }).click();
+  await row.getByRole('link', { name: 'Releases →' }).click();
   await expect(page).toHaveURL(/\/releases\?serviceId=/);
 
   await page.getByRole('button', { name: 'Create release' }).click();
@@ -29,10 +29,15 @@ test('service -> release -> contract -> rollback', async ({ page }) => {
   await page.getByRole('button', { name: 'Activate contract' }).click();
   await expect(page.getByText('PROTECTED_ROLLOUT')).toBeVisible();
 
+  // The dimension headers are part of the control room contract.
+  await expect(page.getByText('COMPUTE', { exact: true })).toBeVisible();
+  await expect(page.getByText('ARTIFACT', { exact: true })).toBeVisible();
+  await expect(page.getByText('DATABASE', { exact: true })).toBeVisible();
+
   await page.getByRole('button', { name: 'Roll back' }).first().click();
   await page.getByRole('dialog').getByRole('button', { name: 'Roll back' }).click();
-  await expect(page.getByText('ROLLED_BACK')).toBeVisible();
+  await expect(page.getByText('ROLLED_BACK', { exact: true }).first()).toBeVisible();
 
-  await expect(page.getByText('ROLLBACK_COMPLETED')).toBeVisible();
-  await expect(page.getByText('CONTRACT_ACTIVATED')).toBeVisible();
+  await expect(page.getByText('ROLLBACK_COMPLETED', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('CONTRACT_ACTIVATED', { exact: true }).first()).toBeVisible();
 });

@@ -34,3 +34,14 @@ ADR-002: long-running JVM, predictable health checks, no cold starts.
 Nothing in this diagram has actually been deployed to a real AWS account
 from this build — `cdk synth` was verified, `cdk deploy` was not run (no
 AWS credentials in this environment). See `docs/operations/AWS_DEPLOYMENT.md`.
+
+## Connector IAM (connectivity layer)
+
+The task role additionally carries: `ObserveEcsRuntimes`, ECR
+`VerifyArtifacts`, SQS/EventBridge/CloudWatch discovery, Secrets Manager
+reads under `rollbackshield/*`, and `ExecuteControlledRollback`
+(`ecs:UpdateService` on `service/*/*` only). Customer-account observation
+uses STS AssumeRole (`sts:AssumeRole` on
+`arn:aws:iam::*:role/RollbackShieldObservationRole` with an external-id
+condition) — the control plane never holds customer keys. See
+`infrastructure/lib/control-plane-stack.ts` and `docs/integrations/AWS.md`.

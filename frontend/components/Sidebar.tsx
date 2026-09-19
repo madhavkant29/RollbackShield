@@ -12,8 +12,10 @@ import {
 
 const NAV_ITEMS = [
   { href: '/', label: 'Overview' },
+  { href: '/integrations', label: 'Integrations' },
   { href: '/services', label: 'Services' },
   { href: '/releases', label: 'Releases' },
+  { href: '/reversibility', label: 'Reversibility' },
   { href: '/contracts', label: 'Contracts' },
   { href: '/audit', label: 'Audit' },
   { href: '/settings', label: 'Settings' },

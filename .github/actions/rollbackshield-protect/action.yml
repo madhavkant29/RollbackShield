@@ -1,0 +1,51 @@
+name: RollbackShield protect
+description: >
+  Activate the rollback contract that opens the protected rollback window
+  after a deployment. The contract rules are the deterministic compatibility
+  rules the local SDK enforces; they are versioned and hashed by the control
+  plane, never interpreted by this action.
+
+inputs:
+  api-url:
+    description: RollbackShield control-plane base URL
+    required: true
+  token:
+    description: Cognito access token (or the local dev token)
+    required: true
+  release-id:
+    description: Release id returned by the preflight action
+    required: true
+  rollback-window-seconds:
+    description: How long protection stays active
+    required: false
+    default: "7200"
+  rules-file:
+    description: Path to a JSON array of compatibility rules
+    required: true
+
+outputs:
+  contract-id:
+    description: The activated contract id
+    value: ${{ steps.contract.outputs.contract-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Activate rollback contract
+      id: contract
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="${{ inputs.api-url }}"
+        auth="Authorization: Bearer ${{ inputs.token }}"
+
+        body=$(jq -n \
+          --argjson window "${{ inputs.rollback-window-seconds }}" \
+          --slurpfile rules "${{ inputs.rules-file }}" \
+          '{rollbackWindowSeconds: $window, candidateEpochRequiredForAsyncWork: true, rules: $rules[0]}')
+
+        contract=$(curl -sf -X POST "$base/api/v1/releases/${{ inputs.release-id }}/contracts" \
+          -H "$auth" -H 'Content-Type: application/json' -d "$body")
+        echo "$contract" | jq -c .
+        echo "contract-id=$(echo "$contract" | jq -r .contractId)" >> "$GITHUB_OUTPUT"
+        echo "Protected rollback window open for ${{ inputs.release-id }}"

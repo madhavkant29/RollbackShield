@@ -94,9 +94,16 @@ class ReleaseLifecycleIntegrationTest {
             .andExpect(jsonPath("$.rules[0].type").value("ENUM_ALLOWED_VALUES"))
             .andExpect(jsonPath("$.rules[0].previousVersionSupports").isArray());
 
-        // 5. reversibility is REVERSIBLE while protected
+        // 5. reversibility is AT_RISK/UNKNOWN while protected but with no
+        // connected runtime or migration source: the contract checks pass,
+        // and the report states exactly why the rest cannot be claimed.
         mockMvc.perform(get("/api/v1/releases/" + releaseId + "/reversibility"))
-            .andExpect(jsonPath("$.status").value("REVERSIBLE"));
+            .andExpect(jsonPath("$.status").value("AT_RISK"))
+            .andExpect(jsonPath("$.verdict").value("UNKNOWN"))
+            .andExpect(jsonPath("$.checks", org.hamcrest.Matchers.hasItem(
+                org.hamcrest.Matchers.hasEntry("blockerCode", "NO_RUNTIME_MAPPING"))))
+            .andExpect(jsonPath("$.checks", org.hamcrest.Matchers.hasItem(
+                org.hamcrest.Matchers.hasEntry("blockerCode", "MIGRATION_ANALYSIS_UNAVAILABLE"))));
 
         // 6. enqueue async work under the current epoch
         String jobResponse = mockMvc.perform(post("/api/v1/releases/" + releaseId + "/work")

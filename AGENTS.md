@@ -7,21 +7,28 @@ before touching anything.
 ## What this project is
 
 RollbackShield: a deployment reversibility control plane. See
-`docs/PRODUCT_OVERVIEW.md`. Full context for a first-time agent:
-`HANDOFF.md` at repo root (delete that file once its checklist is done —
-it's a one-time briefing, not standing instructions; this file is).
+`docs/PRODUCT_OVERVIEW.md` and `docs/architecture/CONNECTIVITY_MODEL.md`
+for the current product and how the control plane relates to the local
+enforcement SDK.
 
 ## Build & test (run in this order)
 
 ```
 cd sdk-java && mvn install      # backend doesn't need this; demo-app/demo-worker do
 cd ../backend && mvn verify     # includes ArchUnit + integration tests
-cd ../frontend && npm install && npm run build
+cd ../frontend && npm install && npm run build && npm run lint
+cd ../cli && npm install && npm test
 cd ../infrastructure && npm install && npx cdk synth --all
 ```
 
 If any of these fail, that's real signal — fix the actual error, don't
 work around it by deleting the failing test or loosening a check.
+
+Local note: this machine has no Java 21 on PATH by default. Use
+`$env:JAVA_HOME='C:\Users\madha\.jdks\temurin-21\jdk-21.0.12.1+1'` with the
+IntelliJ-bundled Maven
+(`C:\Program Files\JetBrains\IntelliJ IDEA 2026.2.1\plugins\maven-plugin\lib\maven3\bin\mvn.cmd`);
+Maven on JDK 26 breaks Mockito/ByteBuddy.
 
 ## Non-negotiable rules
 
@@ -32,12 +39,11 @@ work around it by deleting the failing test or loosening a check.
    `docs/development/MODULE_BOUNDARIES.md`.
 2. **Every module follows `domain/application/adapter/api`.** Copy an
    existing module's shape (e.g. `release/`) for a new one.
-3. **Hackathon freeze rule still applies.** Don't build anything listed
-   in `docs/product/ROADMAP.md` (ConsumerLease, replay certification,
-   artifact reachability, multi-SDK, billing, K8s, etc.) until everything
-   in `docs/product/LIMITATIONS.md` is closed. If tempted to add a
-   "nice to have," check ROADMAP.md first — if it's there, it's
-   deliberately deferred.
+3. **Check `docs/product/ROADMAP.md` before adding a "nice to have".**
+   The connectivity layer (integrators/connectors/discovery/mapping/
+   observation/evidence/rollback execution) was explicitly commissioned
+   and is implemented; everything else listed in ROADMAP.md is
+   deliberately deferred. Do not build ROADMAP items opportunistically.
 4. **Stable error codes, not message strings.** New failure modes get a
    new `ApiException` subclass or a case in `GlobalExceptionHandler`,
    registered in `docs/API_GUIDE.md`'s error code table.
@@ -67,13 +73,19 @@ work around it by deleting the failing test or loosening a check.
 - Domain model: `docs/DOMAIN_MODEL.md`
 - Release lifecycle: `docs/RELEASE_LIFECYCLE.md`
 - API surface: `docs/API_GUIDE.md`
-- Architecture: `docs/architecture/` (start with `SYSTEM_DESIGN.md`)
+- Architecture: `docs/architecture/` (start with `SYSTEM_DESIGN.md`, then
+  `CONNECTIVITY_MODEL.md`, `SERVICE_DISCOVERY.md`, `SERVICE_MAPPING.md`,
+  `REVERSIBILITY_GRAPH.md`)
+- Connectors: `docs/integrations/` (start with
+  `CONNECTOR_ARCHITECTURE.md`, then the per-provider file)
+- CLI: `docs/integrations/CLI.md` (source in `cli/`)
 - Decisions and why: `docs/adr/`
 - Current known gaps: `docs/product/LIMITATIONS.md` — **check this before
   assuming something is broken or missing; it may already be tracked**
 - What's deliberately not built yet: `docs/product/ROADMAP.md`
 - Local dev: `docs/development/LOCAL_DEVELOPMENT.md` (no Docker needed)
-- AWS deployment: `docs/operations/AWS_DEPLOYMENT.md`
+- AWS deployment + live verification checklist:
+  `docs/operations/AWS_DEPLOYMENT.md`
 
 ## Never do this
 

@@ -61,3 +61,33 @@ set; otherwise it skips. Not part of CI (it needs a live backend).
    create a release, walk it through prepare → ready → activate a
    contract, watch the control room.
 3. Or skip the UI and run `ProtectedDemo` for the same flow via stdout.
+
+## Connected flow locally (no AWS account needed)
+
+The connectivity layer is runnable locally without cloud credentials:
+
+1. **FLYWAY**: create a temp directory with `V42__...sql` files and
+   connect an integration with `credential.kind = NONE`, `endpoint` =
+   directory, `configuration.directory` = directory. The connection test
+   reads the directory for real; nothing is fabricated.
+2. **POSTGRESQL**: `docker run postgres:16`, connect with
+   `credential.kind = POSTGRES_PASSWORD` and `secretReference` naming an
+   environment variable that holds the password (never pass the password
+   in the request).
+3. **KUBERNETES**: put a kubeconfig in an env var, use
+   `credential.kind = KUBERNETES_KUBECONFIG`.
+4. **AWS**: needs real credentials in the backend process environment
+   (or `~/.aws/credentials`); without them the connection test fails
+   honestly and the integration shows ERROR. LocalStack-based tests cover
+   STS/SQS/Logs/Events; ECS/ECR need a real account
+   (`docs/operations/AWS_DEPLOYMENT.md`).
+5. Import a discovered runtime, **Observe deployment**, **Create release
+   from observation**, then open the control room: the preflight shows
+   PASS/FAIL per dimension with evidence, and reports blockers (e.g.
+   `NO_RUNTIME_MAPPING`, `MIGRATION_ANALYSIS_UNAVAILABLE`) instead of
+   assuming safety.
+
+CLI against the same local backend:
+`cd cli && npm install && npm run build && node dist/index.js login --api-url http://localhost:8080`
+(no token needed under the `local` profile), then
+`node dist/index.js services list`.

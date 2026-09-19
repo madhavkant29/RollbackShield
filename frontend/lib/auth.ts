@@ -157,9 +157,10 @@ async function refreshTokens(tokens: Tokens): Promise<Tokens | null> {
 }
 
 /**
- * Returns a currently-valid access token, refreshing it if it is within a
- * minute of expiry. Returns null when unconfigured, signed out, or the
- * refresh failed (callers then simply send no `Authorization` header).
+ * Returns the Bearer token for API calls, refreshing within a minute of
+ * expiry. The ID token is preferred: the control plane reads
+ * `custom:organization_id` from the verified JWT, and Cognito only emits
+ * custom attributes in the ID token, never the access token.
  */
 export async function getAccessToken(): Promise<string | null> {
   if (!authConfigured || typeof window === 'undefined') return null;
@@ -173,7 +174,7 @@ export async function getAccessToken(): Promise<string | null> {
     }
     tokens = refreshed;
   }
-  return tokens.accessToken;
+  return tokens.idToken ?? tokens.accessToken;
 }
 
 export function isSignedIn(): boolean {

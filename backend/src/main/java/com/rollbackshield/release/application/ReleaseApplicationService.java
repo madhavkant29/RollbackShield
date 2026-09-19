@@ -81,32 +81,54 @@ public class ReleaseApplicationService {
     }
 
     /**
-     * Full rollback workflow (§14): ROLLING_BACK, invalidate the candidate
-     * epoch so no pending work can fire its irreversible effect, then
-     * ROLLED_BACK. Idempotent: re-invoking on an already-ROLLED_BACK release
-     * is a conflict, not a silent no-op, so a caller always knows which
-     * attempt actually executed.
+     * Full rollback workflow (§14) without a connected runtime: ROLLING_BACK,
+     * invalidate the candidate epoch so no pending work can fire its
+     * irreversible effect, then ROLLED_BACK. The rollback orchestrator uses
+     * the individual steps so it can interleave real provider calls; this
+     * method remains the control-plane-only path. Idempotent: re-invoking on
+     * an already-ROLLED_BACK release is a conflict, not a silent no-op.
      */
     public Release rollback(ReleaseId releaseId, String reason) {
-        Release before = releases.findById(releaseId)
-            .orElseThrow(() -> new NotFoundException("RELEASE_NOT_FOUND", "No release " + releaseId));
+        Release rollingBack = beginRollback(releaseId, reason);
+        invalidateEpoch(rollingBack);
+        return completeRollback(releaseId, "epoch invalidated, rollback recorded");
+    }
 
+    /** Step 1-2 of rollback: authorize was done by the caller, now lock the state in. */
+    public Release beginRollback(ReleaseId releaseId, String reason) {
         Release rollingBack = transition(releaseId, ReleaseState.ROLLING_BACK, "operator", reason);
         events.publish(DomainEvent.of("RollbackStarted", rollingBack.organizationId().toString(),
             releaseId.toString(), Map.of("reason", reason)));
+        return rollingBack;
+    }
 
-        workFence.invalidateEpoch(releaseId, rollingBack.epoch());
+    /** Step 3: no pending candidate work may produce effects after this. */
+    public void invalidateEpoch(Release release) {
+        workFence.invalidateEpoch(release.id(), release.epoch());
+    }
 
-        Release rolledBack = transition(releaseId, ReleaseState.ROLLED_BACK, "system",
-            "epoch invalidated, rollback verified");
-
+    /** Final step: the rollback actually converged (or was control-plane only). */
+    public Release completeRollback(ReleaseId releaseId, String detail) {
+        Release before = releases.findById(releaseId)
+            .orElseThrow(() -> new NotFoundException("RELEASE_NOT_FOUND", "No release " + releaseId));
+        Release rolledBack = transition(releaseId, ReleaseState.ROLLED_BACK, "system", detail);
         auditTrail.append(AuditEvent.of(rolledBack.organizationId().toString(), releaseId.toString(),
-            "operator", AuditAction.ROLLBACK_COMPLETED, releaseId.toString(), reason,
+            "system", AuditAction.ROLLBACK_COMPLETED, releaseId.toString(), detail,
             before.state().name(), rolledBack.state().name(), Map.of()));
         events.publish(DomainEvent.of("ReleaseRolledBack", rolledBack.organizationId().toString(),
             releaseId.toString(), Map.of("epoch", String.valueOf(rolledBack.epoch()))));
-
         return rolledBack;
+    }
+
+    /** A rollback that did not converge ends FAILED with the exact step; never ROLLED_BACK. */
+    public Release failRollback(ReleaseId releaseId, String reason) {
+        Release failed = transition(releaseId, ReleaseState.FAILED, "system", reason);
+        auditTrail.append(AuditEvent.of(failed.organizationId().toString(), releaseId.toString(),
+            "system", AuditAction.ROLLBACK_EXECUTION_FAILED, releaseId.toString(), reason,
+            "ROLLING_BACK", "FAILED", Map.of()));
+        events.publish(DomainEvent.of("RollbackFailed", failed.organizationId().toString(),
+            releaseId.toString(), Map.of("reason", reason)));
+        return failed;
     }
 
     public Release commit(ReleaseId releaseId) {

@@ -1,6 +1,9 @@
 FROM eclipse-temurin:21-jre-alpine
 
-RUN addgroup -S rollbackshield && adduser -S rollbackshield -G rollbackshield
+# The ECS task health check shells out to curl; the JRE-alpine base does not
+# ship it, so install it explicitly or every task fails its health check.
+RUN apk add --no-cache curl \
+    && addgroup -S rollbackshield && adduser -S rollbackshield -G rollbackshield
 USER rollbackshield
 
 WORKDIR /app

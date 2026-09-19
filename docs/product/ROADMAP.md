@@ -1,32 +1,40 @@
 # Roadmap (future only — none of this is implemented)
 
-**v0.2** — external developer onboarding, API credentials, environment
-separation, Maven Central SDK publishing, contract draft/review workflow
-before activation (currently create+activate are atomic).
+The connectivity layer (integrations, connectors, discovery, service
+mapping, deployment observation, evidence preflight, rollback execution)
+is now implemented; the items below are what remains deliberately
+deferred.
 
-**v0.3** — `ConsumerLease`, historical replay certification.
+**Next — live verification and hardening**
+- Live AWS run of ECS discovery/rollback and ECR digest verification in a
+  real account (`docs/operations/AWS_DEPLOYMENT.md`).
+- SDK decision telemetry ingestion (`MutationBlocked`,
+  `RollbackRiskDetected`) so blocked mutations appear in the audit trail
+  without a control-plane round trip.
+- Per-integration/per-contract credentials instead of one shared service
+  credential; mTLS for worker/SDK calls.
 
-**v0.4** — `ArtifactReference` / artifact reachability checks.
+**v0.2** — additional connectors, in priority order: GitLab (source +
+CI), Jenkins native pipeline step, AWS CodePipeline, Argo CD / Flux
+deployment observation, Liquibase migration analysis, Kafka/MSK and
+Kinesis consumer/queue discovery. The connector framework already
+supports them as new `CapabilityProvider`s; none are stubbed in this
+build.
 
-**v0.5** — CI/CD deployment gates (GitHub Actions, GitLab, Jenkins
-integrations).
+**v0.3** — `ConsumerLease`, historical replay certification; column-usage
+static analysis so destructive migrations can be matched to fields the
+previous release actually reads (today the migration range is proven, the
+per-field usage is not).
 
-**v0.6** — Argo CD / ECS / EKS deployment-tool integrations
-(`DeploymentIntegration`).
+**v0.4** — additional runtime executors: Kubernetes rollback execution,
+Docker Engine/Compose observation, GHCR/Docker Hub/generic OCI artifact
+verification.
 
-**v0.7** — database-evolution protection (schema migrations as a first-
-class reversibility concern, not just row-level compatibility rules).
-
-**v0.8** — additional language SDKs / sidecar mode for non-JVM apps.
-
-**v0.9** — `ExternalCloudConnection` — connect to a customer's own AWS
-account rather than running inside RollbackShield's.
+**v0.5** — multi-language SDKs / sidecar mode for non-JVM apps.
 
 **v1** — production SaaS: billing, enterprise auth, usage metering,
-advanced RBAC, operational maturity (multi-instance work fencing per
-ADR-005, structured logging/metrics per `OBSERVABILITY.md`, worker/SDK
-service-credential auth per `SECURITY_ARCHITECTURE.md`).
+advanced RBAC, richer observability (dashboards, structured audit export).
 
-See `docs/product/LIMITATIONS.md` for gaps in what v0.1 already claims to
-do, as distinct from this list of what it deliberately doesn't attempt
-yet.
+See `docs/product/LIMITATIONS.md` for gaps in what the current build
+claims to do, as distinct from this list of what it deliberately doesn't
+attempt yet.

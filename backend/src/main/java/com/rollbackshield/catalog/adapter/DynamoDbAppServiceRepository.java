@@ -55,7 +55,12 @@ public class DynamoDbAppServiceRepository implements AppServiceRepository {
     @Override
     public List<AppService> findByOrganization(OrganizationId organizationId) {
         return table.index("gsi1")
-            .query(QueryConditional.keyEqualTo(Key.builder().partitionValue("ORG#" + organizationId).build()))
+            // gsi1pk is shared by every item type of an organization; the
+            // sort prefix keeps foreign items (integrations, mappings) from
+            // being deserialized as services. Without it the query maps
+            // foreign items into this bean and NPEs on null fields.
+            .query(QueryConditional.sortBeginsWith(Key.builder()
+                .partitionValue("ORG#" + organizationId).sortValue("SERVICEENTITY#").build()))
             .stream()
             .flatMap(page -> page.items().stream())
             .map(DynamoDbAppServiceRepository::toDomain)

@@ -19,6 +19,9 @@ import java.util.UUID;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final org.slf4j.Logger log =
+        org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiError> handleApiException(ApiException ex) {
         String requestId = requestId();
@@ -49,6 +52,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpected(Exception ex) {
+        // Never swallow an unexpected failure: the response stays generic,
+        // but the cause must be diagnosable from the logs.
+        log.error("unhandled exception while serving a request (requestId={})", requestId(), ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(ApiError.of("INTERNAL_ERROR", "An unexpected error occurred", requestId(), Map.of()));
     }

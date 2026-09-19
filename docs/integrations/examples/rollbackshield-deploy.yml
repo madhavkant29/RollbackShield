@@ -1,0 +1,44 @@
+# Example: deploy with a guarded rollback window.
+#
+# Copy this workflow into the repository that owns a service, and set the
+# secrets ROLLBACKSHIELD_API_URL, ROLLBACKSHIELD_TOKEN and the variable
+# ROLLBACKSHIELD_SERVICE_ID. The preflight step fails the pipeline when the
+# deployment would not be reversible; the protect step opens the protected
+# rollback window only after the deploy succeeds.
+
+name: deploy-payments
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./gradlew build
+
+      - name: Test
+        run: ./gradlew test
+
+      - name: RollbackShield preflight
+        id: preflight
+        uses: your-org/rollbackshield/.github/actions/rollbackshield-preflight@main
+        with:
+          api-url: ${{ secrets.ROLLBACKSHIELD_API_URL }}
+          token: ${{ secrets.ROLLBACKSHIELD_TOKEN }}
+          service-id: ${{ vars.ROLLBACKSHIELD_SERVICE_ID }}
+
+      - name: Deploy
+        run: ./scripts/deploy.sh
+
+      - name: RollbackShield protect
+        uses: your-org/rollbackshield/.github/actions/rollbackshield-protect@main
+        with:
+          api-url: ${{ secrets.ROLLBACKSHIELD_API_URL }}
+          token: ${{ secrets.ROLLBACKSHIELD_TOKEN }}
+          release-id: ${{ steps.preflight.outputs.release-id }}
+          rules-file: .rollbackshield/rules.json

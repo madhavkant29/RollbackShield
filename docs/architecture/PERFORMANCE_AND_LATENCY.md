@@ -24,3 +24,28 @@ Add a `sdk-java/src/jmh` benchmark module measuring: cache lookup alone,
 evaluation with 1/5/100 rules, telemetry enqueue. Until that exists, treat
 the latency section of any demo narrative as a design claim, not a
 measured one.
+
+## Path classification (connectivity layer)
+
+Latency-sensitive (must stay local/fast):
+
+- application mutations → SDK policy cache + deterministic evaluator
+  (never a control-plane call);
+- work `redeem` → DynamoDB conditional write (bounded, single round trip;
+  duplicate delivery is idempotent by ledger key).
+
+Background (must never block a hot path):
+
+- connector sync/discovery (paginated, capped attribute lookups, batched
+  `DescribeServices`);
+- CloudWatch evidence queries (capped at 100 events);
+- Kubernetes/AWS client construction (cached per integration/region/
+  credentials);
+- domain event publication (best effort, duplicate-tolerant).
+
+User/pipeline-initiated (allowed provider calls, bounded):
+
+- connection tests, deployment observation, preflight (live runtime +
+  artifact reads), rollback execution (poll interval 5s, timeout 600s by
+  default, configurable via
+  `rollbackshield.rollback.monitor-*`).

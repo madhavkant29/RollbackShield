@@ -72,3 +72,27 @@ handler → structured `400 VALIDATION_FAILED`.
 ## Logging
 No JWTs, passwords, or AWS credentials are logged anywhere in this
 codebase (grep-checked manually, not yet an automated lint rule).
+
+## Connector credentials and tenant isolation (connectivity layer)
+
+- `IntegrationCredentialReference` persists references only; values live in
+  the process environment (`local`) or Secrets Manager under
+  `rollbackshield/*` (`aws`). No API returns a secret; connector errors
+  are length-capped before audit/response.
+- AWS customer mode is STS AssumeRole with an external id; the trust
+  policy condition and the `RollbackShieldObservationRole` naming are
+  documented in `docs/operations/AWS_DEPLOYMENT.md`. Static customer keys
+  are rejected by validation (`INVALID_CREDENTIAL_REFERENCE`).
+- The task role's observation permissions and the single mutating call
+  (`ecs:UpdateService`) are separate statements in
+  `infrastructure/lib/control-plane-stack.ts`; rollback execution is its
+  own capability, never implied by read access.
+- Tenant scope on the new endpoints (`/integrations/**`,
+  `/services/*/mapping`, `/services/*/observations`) always comes from
+  `CurrentPrincipal`; resources are resolved through the owning
+  application service, which throws `NOT_FOUND` for another org's ids so
+  existence never leaks.
+- Rollback authorization requires both ownership (release org == caller
+  org) and a valid state transition (READY/PROTECTED_ROLLOUT/AT_RISK);
+  every execution step is audited (`ROLLBACK_EXECUTION_STEP`) and a failed
+  step records `ROLLBACK_EXECUTION_FAILED` with the provider message.

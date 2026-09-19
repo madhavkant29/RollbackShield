@@ -2,6 +2,7 @@ package com.rollbackshield.release.api;
 
 import com.rollbackshield.release.application.ReleaseApplicationService;
 import com.rollbackshield.release.domain.Release;
+import com.rollbackshield.rollback.application.RollbackOrchestrator;
 import com.rollbackshield.shared.domain.OrganizationId;
 import com.rollbackshield.shared.domain.ReleaseId;
 import com.rollbackshield.shared.domain.ServiceId;
@@ -20,9 +21,11 @@ import static com.rollbackshield.release.api.ReleaseDtos.*;
 public class ReleaseController {
 
     private final ReleaseApplicationService releases;
+    private final RollbackOrchestrator rollbacks;
 
-    public ReleaseController(ReleaseApplicationService releases) {
+    public ReleaseController(ReleaseApplicationService releases, RollbackOrchestrator rollbacks) {
         this.releases = releases;
+        this.rollbacks = rollbacks;
     }
 
     @PostMapping
@@ -59,7 +62,8 @@ public class ReleaseController {
     public ReleaseResponse rollback(@PathVariable String releaseId,
                                      @RequestBody(required = false) RollbackRequest request) {
         String reason = request != null && request.reason() != null ? request.reason() : "operator requested";
-        return toResponse(releases.rollback(ReleaseId.of(releaseId), reason));
+        OrganizationId org = OrganizationId.of(CurrentPrincipal.get().organizationId());
+        return toResponse(rollbacks.rollback(org, ReleaseId.of(releaseId), reason));
     }
 
     @PostMapping("/{releaseId}/commit")

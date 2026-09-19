@@ -49,11 +49,11 @@ spring:
   config:
     activate:
       on-profile: aws
-security:
-  oauth2:
-    resourceserver:
-      jwt:
-        issuer-uri: ${COGNITO_ISSUER_URI}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${COGNITO_ISSUER_URI}
 rollbackshield:
   persistence: dynamodb
   events: eventbridge

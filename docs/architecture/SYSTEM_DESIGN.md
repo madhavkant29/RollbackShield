@@ -70,11 +70,29 @@ sequenceDiagram
 
 ## Consistency model
 Release transitions: optimistic concurrency via
-`ReleaseRepository.compareAndSave()` (expected-state precondition),
-backed by DynamoDB's version-attribute conditional put. Audit trail:
-append-only, no update path. Work redemption: first-writer-wins via
-`ConcurrentHashMap.computeIfAbsent` (in-memory today — see LIMITATIONS.md
-for the DynamoDB-backed version needed before scaling past one instance).
+  `ReleaseRepository.compareAndSave()` (expected-state precondition),
+  backed by DynamoDB's version-attribute conditional put. Audit trail:
+  append-only, no update path. Work redemption: durable, multi-instance
+  safe (DynamoDB condition + redemption ledger; ADR-005), with an
+  in-memory implementation of the same ports for the `local` profile.
+
+## Connectivity layer (implemented)
+
+The control plane is also a connectivity product: integrations and
+connectors observe connected systems, discovery and mapping build the
+service model, deployment observation creates releases from real
+deployments, and preflight/rollback execute against the connected runtime.
+Start with `docs/architecture/CONNECTIVITY_MODEL.md`, then
+`SERVICE_DISCOVERY.md`, `SERVICE_MAPPING.md`, `REVERSIBILITY_GRAPH.md`
+and `docs/integrations/CONNECTOR_ARCHITECTURE.md`. The enforcement plane
+(local SDK + work fence) is unchanged and remains off the network path.
+
+The reversibility graph is not a separate subsystem: it is the structured
+`checks` + `evidence` + `blockerPaths` assembled per request by the
+reversibility application services from connectors, mappings, observation
+records and contracts. Adding a runtime provider (ECS, Kubernetes) required
+no core changes -- provider behavior is reached through capability ports,
+enforced by `ModuleBoundaryTest` and `ProviderIndependenceTest`.
 
 ## Known limitations, tradeoffs, future direction
 See `docs/product/LIMITATIONS.md` and `docs/product/ROADMAP.md`.
