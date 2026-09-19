@@ -54,7 +54,10 @@ public class DynamoDbReleaseRepository implements ReleaseRepository {
     @Override
     public List<Release> findByService(ServiceId serviceId) {
         return table.index("gsi1")
-            .query(QueryConditional.keyEqualTo(Key.builder().partitionValue("SERVICE#" + serviceId).build()))
+            // SERVICE# partition also carries DeploymentObservation items;
+            // prefix-filter so observations are never mapped as releases.
+            .query(QueryConditional.sortBeginsWith(Key.builder()
+                .partitionValue("SERVICE#" + serviceId).sortValue("RELEASE#").build()))
             .stream()
             .flatMap(page -> page.items().stream())
             .map(DynamoDbReleaseRepository::toDomain)

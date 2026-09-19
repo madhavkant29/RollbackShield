@@ -100,3 +100,7 @@ than risking a duplicate (see `docs/features/WORK_FENCING.md`).
 - `GET /work/poll`, `POST /work/{jobId}/redeem`, and
   `GET /contracts/{contractId}/policy` require the shared service
   credential in both profiles.
+
+## Deployed frontend/API edge (hackathon)
+
+The browser reaches the API directly through API Gateway HTTPS (	4dv6crzic.execute-api.ap-south-1.amazonaws.com) with a public HTTP proxy to the internet-facing ALB; CORS is restricted to the Amplify origin. This is a deliberate hackathon tradeoff (public ALB remains reachable, HTTP hop inside AWS, ~30s API Gateway integration timeout so synchronous rollback can 504 while continuing -- poll release state). See `docs/architecture/FRONTEND_API_EDGE.md` and `docs/adr/006-api-gateway-public-alb-hackathon-edge.md`; post-hackathon target is VPC Link + private ALB plus async rollback operations.

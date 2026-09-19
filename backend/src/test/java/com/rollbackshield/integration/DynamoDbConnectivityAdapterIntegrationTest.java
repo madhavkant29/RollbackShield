@@ -228,6 +228,9 @@ class DynamoDbConnectivityAdapterIntegrationTest {
             .map(observation -> observation.identity().candidateRevision())
             .contains("arn:aws:ecs:us-east-1:111122223333:task-definition/payments:3");
         assertThat(observations.findByService(serviceId)).hasSize(2);
+        // Releases and observations share the SERVICE# partition; both
+        // queries must return only their own item type.
+        assertThat(releasesRepo.findByService(serviceId)).hasSize(1);
     }
 
     private static DeploymentIdentity identity(String previous, String candidate) {

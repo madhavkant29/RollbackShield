@@ -157,6 +157,10 @@ export class ControlPlaneStack extends cdk.Stack {
         ROLLBACKSHIELD_EVENT_BUS: props.eventBus.eventBusName,
         ROLLBACKSHIELD_WORK_QUEUE_URL: props.workQueue.queueUrl,
         COGNITO_ISSUER_URI: `https://cognito-idp.${this.region}.amazonaws.com/${props.userPool.userPoolId}`,
+        // Browser origins allowed to call the API directly (Amplify URL +
+        // local dev). Never '*' for production origins.
+        ROLLBACKSHIELD_ALLOWED_ORIGINS:
+          'https://main.d372yre6lvoau6.amplifyapp.com,http://localhost:3000',
         // Rollback convergence budget for the connector executor.
         ROLLBACKSHIELD_ROLLBACK_MONITOR_TIMEOUT_SECONDS: '600',
         ROLLBACKSHIELD_ROLLBACK_MONITOR_INTERVAL_SECONDS: '5',
